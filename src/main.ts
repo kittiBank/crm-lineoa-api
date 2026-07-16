@@ -13,6 +13,27 @@ async function bootstrap() {
 
   app.useLogger(app.get(Logger));
   
+  // CORS Configuration
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+  ];
+
+  // Add production frontend URL if configured
+  if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+  }
+
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    optionsSuccessStatus: 200,
+  });
+
   // Security
   app.use(helmet());
   app.use(compression());
