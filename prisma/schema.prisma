@@ -1,0 +1,221 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Authentication & User Management
+// ============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("user") // admin, user
+  
+  // Relations
+  lineAccounts   LineAccount[]
+  broadcasts     Broadcast[]
+  templates      MessageTemplate[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ============================================================================
+// LINE OA Configuration
+// ============================================================================
+
+model LineAccount {
+  id                    String   @id @default(cuid())
+  userId                String
+  name                  String
+  channelSecret         String
+  channelAccessToken    String
+  
+  // Relations
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lineUsers             LineUser[]
+  richMenus             RichMenu[]
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId])
+  @@map("line_accounts")
+}
+
+// ============================================================================
+// LINE Users & Messages
+// ============================================================================
+
+model LineUser {
+  id              String   @id @default(cuid())
+  lineAccountId   String
+  lineUserId      String
+  displayName     String?
+  pictureUrl      String?
+  status          String   @default("following") // following, blocked
+  
+  // Tracking
+  followedAt      DateTime?
+  lastActivity    DateTime?
+  
+  // Relations
+  lineAccount     LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
+  messages        Message[]
+  webhookEvents   WebhookEvent[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([lineAccountId, lineUserId])
+  @@index([lineAccountId])
+  @@index([lineUserId])
+  @@map("line_users")
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  lineAccountId   String
+  lineUserId      String
+  message         String
+  type            String   @default("text") // text, image, flex, etc.
+  isRead          Boolean  @default(false)
+  
+  // Relations
+  lineUser        LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([lineUserId])
+  @@map("messages")
+}
+
+// ============================================================================
+// Broadcasts
+// ============================================================================
+
+model Broadcast {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  description     String?
+  templateId      String?
+  status          String   @default("draft") // draft, scheduled, processing, completed, failed
+  messageCount    Int      @default(0)
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
+  
+  // Scheduling
+  scheduledFor    DateTime?
+  sentAt          DateTime?
+  
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template        MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  logs            BroadcastLog[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("broadcasts")
+}
+
+model BroadcastLog {
+  id              String   @id @default(cuid())
+  broadcastId     String
+  lineUserId      String
+  status          String   @default("pending") // pending, sent, failed
+  errorMessage    String?
+  retryCount      Int      @default(0)
+  
+  // Relations
+  broadcast       Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([broadcastId])
+  @@index([status])
+  @@map("broadcast_logs")
+}
+
+// ============================================================================
+// Message Templates
+// ============================================================================
+
+model MessageTemplate {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  messageType     String   @default("text") // text, image, flex, etc.
+  content         String
+  imageUrl        String?
+  
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcasts      Broadcast[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@map("message_templates")
+}
+
+// ============================================================================
+// Rich Menu
+// ============================================================================
+
+model RichMenu {
+  id              String   @id @default(cuid())
+  lineAccountId   String
+  name            String
+  imageUrl        String?
+  isActive        Boolean  @default(false)
+  
+  // Relations
+  lineAccount     LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([lineAccountId])
+  @@map("rich_menus")
+}
+
+// ============================================================================
+// Webhook Events
+// ============================================================================
+
+model WebhookEvent {
+  id              String   @id @default(cuid())
+  lineUserId      String
+  eventType       String   // follow, unfollow, message, postback
+  eventData       Json
+  processed       Boolean  @default(false)
+  
+  // Relations
+  lineUser        LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+
+  @@index([lineUserId])
+  @@index([eventType])
+  @@index([processed])
+  @@map("webhook_events")
+}
