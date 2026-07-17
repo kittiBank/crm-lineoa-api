@@ -1,7 +1,6 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { LoggerModule } from 'nestjs-pino';
-import pino from 'pino';
+import { WinstonModule } from 'nest-winston';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -10,6 +9,8 @@ import { UsersModule } from './modules/users/users.module';
 import { LineModule } from './modules/line/line.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { winstonConfig } from './config/winston.config';
+import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
 @Module({
   imports: [
@@ -17,21 +18,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        level: process.env.LOG_LEVEL || 'debug',
-        transport:
-          process.env.NODE_ENV !== 'production'
-            ? {
-                target: 'pino-pretty',
-                options: {
-                  singleLine: false,
-                  colorize: true,
-                },
-              }
-            : undefined,
-      },
-    }),
+    WinstonModule.forRoot(winstonConfig),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -42,4 +29,8 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(HttpLoggerMiddleware).forRoutes('*');
+  }
+}
