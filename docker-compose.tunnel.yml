@@ -1,0 +1,29 @@
+# Cloudflare quick tunnels (trycloudflare.com)
+#
+# Start:  docker compose -f docker-compose.tunnel.yml up -d
+# URLs:   docker compose -f docker-compose.tunnel.yml logs tunnel-api tunnel-minio
+# Stop:   docker compose -f docker-compose.tunnel.yml down
+#
+# After start, copy URLs from logs:
+#   webhook → LINE Developers: https://<api-url>/api/v1/line/webhook
+#   minio   → set MINIO_PUBLIC_URL=https://<minio-url> in .env
+#             image URL: https://<minio-url>/crm-lineoa/rich-menu/image.png
+#
+# Note: trycloudflare URLs change on every restart. MinIO uses port 9000 (S3 API), not 9001 (console).
+
+services:
+  tunnel-api:
+    image: cloudflare/cloudflared:latest
+    container_name: crm_tunnel_api
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://host.docker.internal:3001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  tunnel-minio:
+    image: cloudflare/cloudflared:latest
+    container_name: crm_tunnel_minio
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://host.docker.internal:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -23,7 +23,10 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "tunnel:up": "docker compose -f docker-compose.tunnel.yml up -d",
+    "tunnel:down": "docker compose -f docker-compose.tunnel.yml down",
+    "tunnel:logs": "docker compose -f docker-compose.tunnel.yml logs -f tunnel-api tunnel-minio"
   },
   "dependencies": {
     "@line/bot-sdk": "^8.4.0",
@@ -44,6 +47,7 @@
     "compression": "^1.7.4",
     "dayjs": "^1.11.10",
     "helmet": "^7.1.0",
+    "minio": "^8.0.7",
     "nest-winston": "^1.10.2",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
