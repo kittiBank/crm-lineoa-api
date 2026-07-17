@@ -1,18 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
 import compression from 'compression';
-import { Logger } from 'nestjs-pino';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
+    rawBody: true,
   });
 
-  app.useLogger(app.get(Logger));
-  
+  const logger = app.get(WINSTON_MODULE_NEST_PROVIDER);
+  app.useLogger(logger);
+
   // CORS Configuration
   const allowedOrigins = [
     'http://localhost:3000',
@@ -66,10 +68,10 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`✅ Application is running on: http://localhost:${port}`);
+  logger.log(`Application is running on: http://localhost:${port}`, 'Bootstrap');
 }
 
 bootstrap().catch((err) => {
-  console.error('❌ Application failed to start', err);
+  console.error('Application failed to start', err);
   process.exit(1);
 });

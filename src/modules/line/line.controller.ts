@@ -1,10 +1,25 @@
-import { Controller, Post, Body, BadRequestException, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  BadRequestException,
+  UseGuards,
+  Request,
+  Req,
+  Headers,
+  RawBodyRequest,
+  Query,
+  Param,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { LineService } from './line.service';
 import { ConfigService } from '@nestjs/config';
 import { VerifyLineDto } from './dto/verify-line.dto';
+import { QueryLineUsersDto } from './dto/query-line-users.dto';
 import * as line from '@line/bot-sdk';
-import { createHmac } from 'crypto';
+import { validateSignature } from '@line/bot-sdk';
+import { Request as ExpressRequest } from 'express';
 
 // JWT Auth Guard (using built-in NestJS guard)
 import { AuthGuard } from '@nestjs/passport';
@@ -18,15 +33,65 @@ export class LineController {
   ) {}
 
   @Post('webhook')
-  @ApiOperation({ summary: 'Webhook endpoint for LINE Bot' })
-  async webhook(@Body() body: line.WebhookRequestBody): Promise<object> {
-    const signature = this.validateSignature(body);
-    if (!signature) {
-      throw new BadRequestException('Invalid signature');
+  @ApiOperation({
+    summary: 'Webhook endpoint for LINE Bot',
+    description:
+      'Receives webhook events from LINE platform (message, follow, unfollow, postback, etc.)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Webhook processed successfully',
+    schema: { example: { status: 'ok' } },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid signature or malformed request',
+  })
+  async webhook(
+    @Req() req: RawBodyRequest<ExpressRequest>,
+    @Headers('x-line-signature') signature: string,
+  ): Promise<object> {
+    const rawBody = req.rawBody;
+
+    if (!rawBody || !this.validateSignature(rawBody, signature)) {
+      throw new BadRequestException('Invalid LINE signature');
     }
 
-    await this.lineService.handleWebhook(body.events);
-    return { status: 'ok' };
+    const body = JSON.parse(rawBody.toString()) as line.WebhookRequestBody;
+
+    // Process webhook events
+    await this.lineService.handleWebhook(body.events ?? []);
+
+    return { status: 'ok', processedEvents: body.events?.length ?? 0 };
+  }
+
+  @Get('users')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get LINE users with pagination and filters' })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated list of LINE users',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLineUsers(
+    @Request() req: { user: { id: string } },
+    @Query() query: QueryLineUsersDto,
+  ) {
+    return this.lineService.findLineUsers(req.user.id, query);
+  }
+
+  @Get('users/:id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get LINE user by ID' })
+  @ApiResponse({ status: 200, description: 'LINE user details' })
+  @ApiResponse({ status: 404, description: 'LINE user not found' })
+  async getLineUserById(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.lineService.findLineUserById(req.user.id, id);
   }
 
   @Post('verify')
@@ -102,15 +167,20 @@ export class LineController {
     }
   }
 
-  private validateSignature(body: any): boolean {
-    const signature =
-      process.env['HTTP_X_LINE_SIGNATURE'] || '';
+
+  private validateSignature(body: Buffer, signature: string): boolean {
+    if (!signature) {
+      return false;
+    }
+
     const secret = this.configService.get<string>(
       'LINE_BOT_CHANNEL_SECRET',
-    ) || '';
-    const hash = createHmac('sha256', secret)
-      .update(JSON.stringify(body))
-      .digest('base64');
-    return hash === signature;
+    );
+    if (!secret || secret === 'your_line_bot_secret_here') {
+      console.error('LINE_BOT_CHANNEL_SECRET is not configured');
+      return false;
+    }
+
+    return validateSignature(body, secret, signature);
   }
 }
