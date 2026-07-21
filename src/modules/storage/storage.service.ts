@@ -31,11 +31,7 @@ export class StorageService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      const exists = await this.client.bucketExists(this.bucket);
-      if (!exists) {
-        await this.client.makeBucket(this.bucket);
-        this.logger.log(`Created bucket: ${this.bucket}`);
-      }
+      await this.ensureBucketReady();
       this.logger.log(`MinIO connected — bucket "${this.bucket}" ready`);
     } catch (error) {
       this.logger.warn(
@@ -44,19 +40,38 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  private async ensureBucketReady(): Promise<void> {
+    const exists = await this.client.bucketExists(this.bucket);
+    if (!exists) {
+      await this.client.makeBucket(this.bucket);
+      this.logger.log(`Created bucket: ${this.bucket}`);
+    }
+  }
+
   async upload(
     key: string,
     buffer: Buffer,
     contentType: string,
   ): Promise<{ key: string; url: string }> {
-    await this.client.putObject(this.bucket, key, buffer, buffer.length, {
-      'Content-Type': contentType,
-    });
+    await this.ensureBucketReady();
 
-    return {
-      key,
-      url: this.getPublicUrl(key),
-    };
+    try {
+      await this.client.putObject(this.bucket, key, buffer, buffer.length, {
+        'Content-Type': contentType,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to upload "${key}" to MinIO: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      throw error;
+    }
+
+    const url = this.getPublicUrl(key);
+    this.logger.log(`Uploaded to MinIO: ${url}`);
+
+    return { key, url };
   }
 
   async delete(key: string): Promise<void> {

@@ -186,6 +186,13 @@ model RichMenu {
   lineAccountId   String
   name            String
   imageUrl        String?
+  lineRichMenuId  String?  @unique
+  menuType        String   @default("default") // default (guest) | member
+  chatBarText     String   @default("Menu")
+  selected        Boolean  @default(false)
+  sizeWidth       Int      @default(2500)
+  sizeHeight      Int      @default(1686)
+  areas           Json     @default("[]")
   isActive        Boolean  @default(false)
   
   // Relations
@@ -195,6 +202,7 @@ model RichMenu {
   updatedAt       DateTime @updatedAt
 
   @@index([lineAccountId])
+  @@index([lineAccountId, menuType])
   @@map("rich_menus")
 }
 
