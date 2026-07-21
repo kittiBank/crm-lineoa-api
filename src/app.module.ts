@@ -10,6 +10,7 @@ import { LineModule } from './modules/line/line.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { RichMenuModule } from './modules/rich-menu/rich-menu.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
@@ -27,6 +28,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
     MessagesModule,
     CampaignsModule,
     StorageModule,
+    RichMenuModule,
   ],
   controllers: [AppController],
   providers: [AppService],
