@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -52,6 +53,26 @@ export class RichMenuController {
   @ApiOkResponse({ description: 'Rich menu list' })
   async findAll(@Request() req: { user: { id: string } }) {
     return this.richMenuService.findAll(req.user.id);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a rich menu by ID' })
+  @ApiOkResponse({ description: 'Rich menu detail' })
+  async findOne(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.richMenuService.findOne(req.user.id, id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a rich menu' })
+  @ApiOkResponse({ description: 'Rich menu deleted' })
+  async remove(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.richMenuService.remove(req.user.id, id);
   }
 
   @Post()

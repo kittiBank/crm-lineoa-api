@@ -38,6 +38,80 @@ export class RichMenuService {
     });
   }
 
+  async findOne(userId: string, richMenuId: string) {
+    const lineAccount =
+      await this.lineAccountRepository.getLineAccountByUserId(userId);
+
+    if (!lineAccount) {
+      throw new NotFoundException('LINE account not found');
+    }
+
+    const menu = await this.prisma.richMenu.findFirst({
+      where: {
+        id: richMenuId,
+        lineAccountId: lineAccount.id,
+      },
+    });
+
+    if (!menu) {
+      throw new NotFoundException('Rich menu not found');
+    }
+
+    return menu;
+  }
+
+  async remove(userId: string, richMenuId: string) {
+    const lineAccount =
+      await this.lineAccountRepository.getLineAccountByUserId(userId);
+
+    if (!lineAccount) {
+      throw new NotFoundException('LINE account not found');
+    }
+
+    const menu = await this.prisma.richMenu.findFirst({
+      where: {
+        id: richMenuId,
+        lineAccountId: lineAccount.id,
+      },
+    });
+
+    if (!menu) {
+      throw new NotFoundException('Rich menu not found');
+    }
+
+    if (menu.lineRichMenuId) {
+      const client = this.getLineClient(lineAccount);
+      try {
+        await client.deleteRichMenu(menu.lineRichMenuId);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to delete LINE rich menu ${menu.lineRichMenuId}: ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      }
+    }
+
+    const storageKey = this.extractStorageKey(menu.imageUrl);
+    if (storageKey) {
+      await this.storageService.delete(storageKey).catch((error) => {
+        this.logger.warn(
+          `Failed to delete MinIO object "${storageKey}": ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      });
+    }
+
+    await this.prisma.richMenu.delete({
+      where: { id: menu.id },
+    });
+
+    this.logger.log(`Rich menu deleted: ${menu.id} for user ${userId}`);
+
+    return { status: 'ok', id: menu.id };
+  }
+
   async create(
     userId: string,
     dto: CreateRichMenuDto,
@@ -256,6 +330,22 @@ export class RichMenuService {
       channelAccessToken: lineAccount.channelAccessToken,
       channelSecret: lineAccount.channelSecret,
     });
+  }
+
+  private extractStorageKey(imageUrl: string | null | undefined): string | null {
+    if (!imageUrl) {
+      return null;
+    }
+
+    const bucket = this.configService.get<string>('MINIO_BUCKET', 'crm-lineoa');
+    const marker = `/${bucket}/`;
+    const markerIndex = imageUrl.indexOf(marker);
+
+    if (markerIndex === -1) {
+      return null;
+    }
+
+    return imageUrl.slice(markerIndex + marker.length);
   }
 
   private buildLineAction(
