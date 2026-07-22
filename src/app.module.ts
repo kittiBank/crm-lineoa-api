@@ -11,6 +11,7 @@ import { MessagesModule } from './modules/messages/messages.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { RichMenuModule } from './modules/rich-menu/rich-menu.module';
+import { TemplatesModule } from './modules/templates/templates.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
@@ -29,6 +30,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
     CampaignsModule,
     StorageModule,
     RichMenuModule,
+    TemplatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
