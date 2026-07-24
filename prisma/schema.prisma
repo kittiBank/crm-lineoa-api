@@ -113,6 +113,7 @@ model Broadcast {
   name            String
   description     String?
   templateId      String?
+  audienceType    String   @default("all") // all, active, new
   status          String   @default("draft") // draft, scheduled, processing, completed, failed
   messageCount    Int      @default(0)
   successCount    Int      @default(0)

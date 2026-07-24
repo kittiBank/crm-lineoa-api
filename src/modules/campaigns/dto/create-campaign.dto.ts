@@ -1,20 +1,23 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDateString,
+  IsIn,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateCampaignDto {
   @ApiProperty({
-    example: 'Summer Campaign 2024',
-    description: 'Campaign name',
-    type: String,
+    example: 'Summer Sale Announcement',
+    description: 'Broadcast title',
   })
   @IsString()
   @IsNotEmpty()
   name!: string;
 
   @ApiProperty({
-    example: 'A promotional campaign for summer products',
-    description: 'Campaign description (optional)',
-    type: String,
+    example: 'Promotional broadcast for summer campaign',
     required: false,
   })
   @IsString()
@@ -22,32 +25,38 @@ export class CreateCampaignDto {
   description?: string;
 
   @ApiProperty({
-    example: 'active',
-    description: 'Campaign status (optional)',
-    enum: ['draft', 'scheduled', 'processing', 'completed', 'failed'],
+    example: 'cltemplate123',
+    description: 'Message template ID',
+  })
+  @IsString()
+  @IsNotEmpty()
+  templateId!: string;
+
+  @ApiProperty({
+    example: 'all',
+    enum: ['all', 'active', 'new'],
     required: false,
   })
   @IsString()
+  @IsIn(['all', 'active', 'new'])
+  @IsOptional()
+  audienceType?: string;
+
+  @ApiProperty({
+    example: 'draft',
+    enum: ['draft', 'scheduled', 'processing'],
+    required: false,
+  })
+  @IsString()
+  @IsIn(['draft', 'scheduled', 'processing'])
   @IsOptional()
   status?: string;
 
   @ApiProperty({
-    example: '2024-06-01T00:00:00Z',
-    description: 'Campaign start date (ISO 8601 format, optional)',
-    type: String,
+    example: '2026-07-25T10:00:00.000Z',
     required: false,
   })
   @IsDateString()
   @IsOptional()
-  startDate?: string;
-
-  @ApiProperty({
-    example: '2024-08-31T23:59:59Z',
-    description: 'Campaign end date (ISO 8601 format, optional)',
-    type: String,
-    required: false,
-  })
-  @IsDateString()
-  @IsOptional()
-  endDate?: string;
+  scheduledFor?: string;
 }

@@ -1,29 +1,44 @@
-import { IsString, IsOptional, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsDateString,
+  IsIn,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateCampaignDto {
-  @ApiProperty({ example: 'Summer Campaign 2024', required: false })
+  @ApiProperty({ example: 'Summer Sale Announcement', required: false })
   @IsString()
   @IsOptional()
   name?: string;
 
-  @ApiProperty({ example: 'A promotional campaign for summer', required: false })
+  @ApiProperty({ example: 'Promotional broadcast for summer campaign', required: false })
   @IsString()
   @IsOptional()
   description?: string;
 
-  @ApiProperty({ example: 'active', required: false })
+  @ApiProperty({ example: 'cltemplate123', required: false })
+  @IsString()
+  @IsOptional()
+  templateId?: string;
+
+  @ApiProperty({ example: 'all', enum: ['all', 'active', 'new'], required: false })
+  @IsString()
+  @IsIn(['all', 'active', 'new'])
+  @IsOptional()
+  audienceType?: string;
+
+  @ApiProperty({
+    example: 'draft',
+    enum: ['draft', 'scheduled', 'processing', 'completed', 'failed'],
+    required: false,
+  })
   @IsString()
   @IsOptional()
   status?: string;
 
-  @ApiProperty({ example: '2024-06-01T00:00:00Z', required: false })
+  @ApiProperty({ example: '2026-07-25T10:00:00.000Z', required: false })
   @IsDateString()
   @IsOptional()
-  startDate?: string;
-
-  @ApiProperty({ example: '2024-08-31T23:59:59Z', required: false })
-  @IsDateString()
-  @IsOptional()
-  endDate?: string;
+  scheduledFor?: string;
 }
