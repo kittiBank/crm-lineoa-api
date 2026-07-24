@@ -158,16 +158,14 @@ export class TemplatesService {
       return [];
     }
 
-    return value
-      .filter(
-        (item): item is Record<string, unknown> =>
-          Boolean(item) &&
-          typeof item === 'object' &&
-          !Array.isArray(item) &&
-          typeof item.type === 'string' &&
-          MESSAGE_TYPES.has(item.type),
-      )
-      .map((item) => item as MessageBlockDto);
+    return value.filter(
+      (item): item is MessageBlockDto =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        typeof (item as MessageBlockDto).type === 'string' &&
+        MESSAGE_TYPES.has((item as MessageBlockDto).type),
+    );
   }
 
   private toResponse(
@@ -178,6 +176,7 @@ export class TemplatesService {
       category: string;
       messageType: string;
       messages: Prisma.JsonValue;
+      content: string;
       isActive: boolean;
       usageCount: number;
       createdAt: Date;

@@ -317,6 +317,13 @@ export class LineService {
     await this.lineClient.pushMessage(userId, messages);
   }
 
+  createClient(channelAccessToken: string, channelSecret: string): line.Client {
+    return new line.Client({
+      channelAccessToken,
+      channelSecret,
+    });
+  }
+
   async getProfile(userId: string): Promise<line.Profile> {
     return await this.lineClient.getProfile(userId);
   }
