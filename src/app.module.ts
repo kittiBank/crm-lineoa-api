@@ -12,6 +12,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { RichMenuModule } from './modules/rich-menu/rich-menu.module';
 import { TemplatesModule } from './modules/templates/templates.module';
+import { MemberLoginModule } from './modules/member-login/member-login.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
@@ -31,6 +32,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
     StorageModule,
     RichMenuModule,
     TemplatesModule,
+    MemberLoginModule,
   ],
   controllers: [AppController],
   providers: [AppService],
