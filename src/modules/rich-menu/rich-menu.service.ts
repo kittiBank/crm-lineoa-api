@@ -281,7 +281,11 @@ export class RichMenuService {
 
     const client = this.getLineClient(lineAccount);
     const lineUsers = await this.prisma.lineUser.findMany({
-      where: { lineAccountId: lineAccount.id, status: 'following' },
+      where: {
+        lineAccountId: lineAccount.id,
+        status: 'following',
+        userType: 'Member',
+      },
     });
 
     let linkedCount = 0;

@@ -185,13 +185,91 @@ export class LineService {
     this.logger.log(`User unfollowed: ${event.source.userId}`);
 
     try {
-      // Update user status to blocked/unfollowed
-      await this.prisma.lineUser.updateMany({
-        where: { lineUserId: event.source.userId as string },
-        data: { status: 'blocked' },
-      });
+      const platformLineUserId = event.source.userId as string;
+      const lineAccount = await this.getDefaultLineAccount();
+
+      if (!lineAccount) {
+        return;
+      }
+
+      await this.revertLineUserToGuest(lineAccount, platformLineUserId, 'blocked');
     } catch (error) {
       this.logger.error('Error handling unfollow event:', error);
+    }
+  }
+
+  /**
+   * Reset member login when user unfollows or blocks the OA.
+   * Clears OTP sessions so they must verify again after re-following.
+   */
+  private async revertLineUserToGuest(
+    lineAccount: {
+      id: string;
+      channelAccessToken: string;
+      channelSecret: string;
+    },
+    platformLineUserId: string,
+    status: 'blocked',
+  ): Promise<void> {
+    const lineUser = await this.prisma.lineUser.findUnique({
+      where: {
+        lineAccountId_lineUserId: {
+          lineAccountId: lineAccount.id,
+          lineUserId: platformLineUserId,
+        },
+      },
+    });
+
+    if (!lineUser) {
+      return;
+    }
+
+    const wasMember = lineUser.userType === 'Member';
+
+    await this.prisma.$transaction([
+      this.prisma.otpSession.deleteMany({
+        where: { lineUserId: lineUser.id },
+      }),
+      this.prisma.lineUser.update({
+        where: { id: lineUser.id },
+        data: {
+          status,
+          userType: 'Guest',
+          phone: null,
+          phoneVerifiedAt: null,
+        },
+      }),
+    ]);
+
+    if (wasMember) {
+      await this.unlinkMemberRichMenu(lineAccount, platformLineUserId);
+    }
+
+    this.logger.log(
+      `User reverted to Guest: ${platformLineUserId} (status=${status})`,
+    );
+  }
+
+  private async unlinkMemberRichMenu(
+    lineAccount: {
+      channelAccessToken: string;
+      channelSecret: string;
+    },
+    platformLineUserId: string,
+  ): Promise<void> {
+    try {
+      const client = new line.Client({
+        channelAccessToken: lineAccount.channelAccessToken,
+        channelSecret: lineAccount.channelSecret,
+      });
+
+      await client.unlinkRichMenuFromUser(platformLineUserId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to unlink rich menu for ${platformLineUserId}: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
     }
   }
 
@@ -384,16 +462,13 @@ export class LineService {
       };
     }
 
-    if (query.userType === 'Guest') {
-      return {
-        data: [],
-        meta: { page, limit, total: 0, totalPages: 0 },
-      };
-    }
-
     const where: Prisma.LineUserWhereInput = {
       lineAccountId: lineAccount.id,
     };
+
+    if (query.userType && query.userType !== 'All') {
+      where.userType = query.userType;
+    }
 
     if (query.search) {
       if (query.searchType === 'displayName') {
@@ -490,6 +565,8 @@ export class LineService {
     displayName: string | null;
     pictureUrl: string | null;
     status: string;
+    userType: string;
+    phone: string | null;
     followedAt: Date | null;
     lastActivity: Date | null;
     createdAt: Date;
@@ -499,7 +576,10 @@ export class LineService {
       lineUserId: user.lineUserId,
       displayName: user.displayName || 'Unknown',
       avatar: user.pictureUrl || undefined,
-      userType: 'Member' as const,
+      userType: (user.userType === 'Member' ? 'Member' : 'Guest') as
+        | 'Member'
+        | 'Guest',
+      phone: user.phone || undefined,
       status: this.mapDbStatusToUi(user.status),
       tags: [] as string[],
       lastActive: (user.lastActivity || user.createdAt).toISOString(),

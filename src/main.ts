@@ -28,6 +28,15 @@ async function bootstrap() {
     allowedOrigins.push(process.env.FRONTEND_URL);
   }
 
+  // LIFF endpoint may be served from a public tunnel / custom domain
+  if (process.env.LIFF_ENDPOINT_URL) {
+    try {
+      allowedOrigins.push(new URL(process.env.LIFF_ENDPOINT_URL).origin);
+    } catch {
+      // ignore invalid URL
+    }
+  }
+
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,

@@ -66,7 +66,10 @@ model LineUser {
   displayName     String?
   pictureUrl      String?
   status          String   @default("following") // following, blocked
-  
+  userType        String   @default("Guest") // Guest | Member
+  phone           String?
+  phoneVerifiedAt DateTime?
+
   // Tracking
   followedAt      DateTime?
   lastActivity    DateTime?
@@ -75,14 +78,40 @@ model LineUser {
   lineAccount     LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
   messages        Message[]
   webhookEvents   WebhookEvent[]
+  otpSessions     OtpSession[]
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@unique([lineAccountId, lineUserId])
+  @@unique([lineAccountId, phone])
   @@index([lineAccountId])
   @@index([lineUserId])
+  @@index([lineAccountId, userType])
   @@map("line_users")
+}
+
+// ============================================================================
+// Member Login OTP
+// ============================================================================
+
+model OtpSession {
+  id           String    @id @default(cuid())
+  lineUserId   String
+  phone        String
+  code         String
+  expiresAt    DateTime
+  verifiedAt   DateTime?
+  attempts     Int       @default(0)
+
+  // Relations
+  lineUser     LineUser  @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime  @default(now())
+
+  @@index([lineUserId, phone])
+  @@index([expiresAt])
+  @@map("otp_sessions")
 }
 
 model Message {
