@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { BroadcastQueueService } from './broadcast-queue.service';
+import { AutoReplyQueueService } from './auto-reply-queue.service';
 
 @Module({
-  providers: [BroadcastQueueService],
-  exports: [BroadcastQueueService],
+  providers: [BroadcastQueueService, AutoReplyQueueService],
+  exports: [BroadcastQueueService, AutoReplyQueueService],
 })
 export class QueueModule {}

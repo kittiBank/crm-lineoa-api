@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryLineUsersDto } from './dto/query-line-users.dto';
+import { AutoReplyQueueService } from '@/queue/auto-reply-queue.service';
 
 @Injectable()
 export class LineService {
@@ -16,6 +17,7 @@ export class LineService {
     private configService: ConfigService,
     private lineAccountRepository: LineAccountRepository,
     private prisma: PrismaService,
+    private autoReplyQueueService: AutoReplyQueueService,
   ) {
     this.lineClient = new line.Client({
       channelAccessToken: this.configService.get<string>(
@@ -67,12 +69,13 @@ export class LineService {
     this.logger.log(`Message from ${event.source.userId}: ${JSON.stringify(event.message)}`);
 
     try {
-      // Get or create LINE user
-      const lineUser = await this.getOrCreateLineUser(
-        event.source.userId as string,
-      );
+      const platformLineUserId = event.source.userId as string;
+      if (!platformLineUserId) {
+        return;
+      }
 
-      // Save message to database
+      const lineUser = await this.getOrCreateLineUser(platformLineUserId);
+
       if (lineUser) {
         await this.prisma.message.create({
           data: {
@@ -84,35 +87,31 @@ export class LineService {
           },
         });
 
-        // Update last activity
         await this.prisma.lineUser.update({
           where: { id: lineUser.id },
           data: { lastActivity: new Date() },
         });
       }
 
-      // Send auto-reply
-      const replyMessages: line.Message[] = [
-        {
-          type: 'text',
-          text: 'สวัสดีค่ะ! ขอบคุณที่ติดต่อเรา เราได้รับข้อความของคุณแล้ว จะติดตอบกลับให้เร็วที่สุดค่ะ',
-        },
-      ];
+      if (event.message.type !== 'text') {
+        return;
+      }
 
-      await this.replyMessage(event.replyToken, replyMessages);
+      const text = (event.message as line.TextEventMessage).text?.trim();
+      if (!text) {
+        return;
+      }
+
+      await this.enqueueAutoReply({
+        platformLineUserId,
+        matchInput: text,
+        replyToken: event.replyToken,
+        eventType: 'message',
+        event,
+        lineUser,
+      });
     } catch (error) {
       this.logger.error('Error handling message event:', error);
-      // Send error message to user
-      try {
-        await this.replyMessage(event.replyToken, [
-          {
-            type: 'text',
-            text: 'ขออภัย เกิดข้อผิดพลาดในการประมวลผลข้อความของคุณ กรุณาลองอีกครั้ง',
-          },
-        ]);
-      } catch (replyError) {
-        this.logger.error('Error sending error reply:', replyError);
-      }
     }
   }
 
@@ -307,24 +306,67 @@ export class LineService {
     this.logger.log(`Postback event: ${event.postback.data}`);
 
     try {
-      const lineUser = await this.getOrCreateLineUser(
-        event.source.userId as string,
-      );
+      const platformLineUserId = event.source.userId as string;
+      if (!platformLineUserId) {
+        return;
+      }
 
-      // Parse postback data (format: action=value)
-      const [action, value] = event.postback.data.split('=');
+      const lineUser = await this.getOrCreateLineUser(platformLineUserId);
 
-      const replyMessages: line.Message[] = [
-        {
-          type: 'text',
-          text: `คุณเลือก: ${value}`,
-        },
-      ];
-
-      await this.replyMessage(event.replyToken, replyMessages);
+      await this.enqueueAutoReply({
+        platformLineUserId,
+        matchInput: event.postback.data,
+        replyToken: event.replyToken,
+        eventType: 'postback',
+        event,
+        lineUser,
+      });
     } catch (error) {
       this.logger.error('Error handling postback event:', error);
     }
+  }
+
+  private async enqueueAutoReply(params: {
+    platformLineUserId: string;
+    matchInput: string;
+    replyToken?: string;
+    eventType: 'message' | 'postback';
+    event: line.WebhookEvent;
+    lineUser: { id: string; lineAccountId: string } | null;
+  }) {
+    const lineUser =
+      params.lineUser ??
+      (await this.getOrCreateLineUser(params.platformLineUserId));
+
+    if (!lineUser) {
+      this.logger.warn('Cannot queue auto-reply: LINE user/account not found');
+      return;
+    }
+
+    const lineAccount = await this.prisma.lineAccount.findUnique({
+      where: { id: lineUser.lineAccountId },
+      select: { id: true, userId: true },
+    });
+
+    if (!lineAccount) {
+      return;
+    }
+
+    await this.prisma.webhookEvent.create({
+      data: {
+        lineUserId: lineUser.id,
+        eventType: params.eventType,
+        eventData: params.event as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.autoReplyQueueService.enqueue({
+      userId: lineAccount.userId,
+      lineAccountId: lineAccount.id,
+      platformLineUserId: params.platformLineUserId,
+      matchInput: params.matchInput,
+      replyToken: params.replyToken,
+    });
   }
 
   private async handleBeaconEvent(event: line.BeaconEvent): Promise<void> {

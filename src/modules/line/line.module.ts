@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { LineService } from './line.service';
 import { LineController } from './line.controller';
 import { PrismaModule } from '@/prisma/prisma.module';
+import { QueueModule } from '@/queue/queue.module';
 import { LineAccountRepository } from './repositories/line-account.repository';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, QueueModule],
   providers: [LineService, LineAccountRepository],
   controllers: [LineController],
   exports: [LineService],
