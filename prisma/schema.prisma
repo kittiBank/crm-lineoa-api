@@ -15,17 +15,18 @@ datasource db {
 // ============================================================================
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String?
-  role      String   @default("user") // admin, user
-  
+  id       String  @id @default(cuid())
+  email    String  @unique
+  password String
+  name     String?
+  role     String  @default("user") // admin, user
+
   // Relations
-  lineAccounts   LineAccount[]
-  broadcasts     Broadcast[]
-  templates      MessageTemplate[]
-  
+  lineAccounts LineAccount[]
+  broadcasts   Broadcast[]
+  templates    MessageTemplate[]
+  autoMessages AutoMessage[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -37,19 +38,19 @@ model User {
 // ============================================================================
 
 model LineAccount {
-  id                    String   @id @default(cuid())
-  userId                String
-  name                  String
-  channelSecret         String
-  channelAccessToken    String
-  
+  id                 String @id @default(cuid())
+  userId             String
+  name               String
+  channelSecret      String
+  channelAccessToken String
+
   // Relations
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lineUsers             LineUser[]
-  richMenus             RichMenu[]
-  
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lineUsers LineUser[]
+  richMenus RichMenu[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId])
   @@map("line_accounts")
@@ -60,28 +61,28 @@ model LineAccount {
 // ============================================================================
 
 model LineUser {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   lineAccountId   String
   lineUserId      String
   displayName     String?
   pictureUrl      String?
-  status          String   @default("following") // following, blocked
-  userType        String   @default("Guest") // Guest | Member
+  status          String    @default("following") // following, blocked
+  userType        String    @default("Guest") // Guest | Member
   phone           String?
   phoneVerifiedAt DateTime?
 
   // Tracking
-  followedAt      DateTime?
-  lastActivity    DateTime?
-  
+  followedAt   DateTime?
+  lastActivity DateTime?
+
   // Relations
-  lineAccount     LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
-  messages        Message[]
-  webhookEvents   WebhookEvent[]
-  otpSessions     OtpSession[]
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lineAccount   LineAccount    @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  webhookEvents WebhookEvent[]
+  otpSessions   OtpSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([lineAccountId, lineUserId])
   @@unique([lineAccountId, phone])
@@ -96,18 +97,18 @@ model LineUser {
 // ============================================================================
 
 model OtpSession {
-  id           String    @id @default(cuid())
-  lineUserId   String
-  phone        String
-  code         String
-  expiresAt    DateTime
-  verifiedAt   DateTime?
-  attempts     Int       @default(0)
+  id         String    @id @default(cuid())
+  lineUserId String
+  phone      String
+  code       String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  attempts   Int       @default(0)
 
   // Relations
-  lineUser     LineUser  @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+  lineUser LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
 
-  createdAt    DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([lineUserId, phone])
   @@index([expiresAt])
@@ -115,18 +116,18 @@ model OtpSession {
 }
 
 model Message {
-  id              String   @id @default(cuid())
-  lineAccountId   String
-  lineUserId      String
-  message         String
-  type            String   @default("text") // text, image, flex, etc.
-  isRead          Boolean  @default(false)
-  
+  id            String  @id @default(cuid())
+  lineAccountId String
+  lineUserId    String
+  message       String
+  type          String  @default("text") // text, image, flex, etc.
+  isRead        Boolean @default(false)
+
   // Relations
-  lineUser        LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lineUser LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([lineUserId])
   @@map("messages")
@@ -137,28 +138,28 @@ model Message {
 // ============================================================================
 
 model Broadcast {
-  id              String   @id @default(cuid())
-  userId          String
-  name            String
-  description     String?
-  templateId      String?
-  audienceType    String   @default("all") // all, active, new
-  status          String   @default("draft") // draft, scheduled, processing, completed, failed
-  messageCount    Int      @default(0)
-  successCount    Int      @default(0)
-  failureCount    Int      @default(0)
-  
+  id           String  @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  templateId   String?
+  audienceType String  @default("all") // all, active, new
+  status       String  @default("draft") // draft, scheduled, processing, completed, failed
+  messageCount Int     @default(0)
+  successCount Int     @default(0)
+  failureCount Int     @default(0)
+
   // Scheduling
-  scheduledFor    DateTime?
-  sentAt          DateTime?
-  
+  scheduledFor DateTime?
+  sentAt       DateTime?
+
   // Relations
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  template        MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  logs            BroadcastLog[]
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  logs     BroadcastLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -166,18 +167,18 @@ model Broadcast {
 }
 
 model BroadcastLog {
-  id              String   @id @default(cuid())
-  broadcastId     String
-  lineUserId      String
-  status          String   @default("pending") // pending, sent, failed
-  errorMessage    String?
-  retryCount      Int      @default(0)
-  
+  id           String  @id @default(cuid())
+  broadcastId  String
+  lineUserId   String
+  status       String  @default("pending") // pending, sent, failed
+  errorMessage String?
+  retryCount   Int     @default(0)
+
   // Relations
-  broadcast       Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([broadcastId])
   @@index([status])
@@ -189,24 +190,25 @@ model BroadcastLog {
 // ============================================================================
 
 model MessageTemplate {
-  id              String   @id @default(cuid())
-  userId          String
-  name            String
-  description     String?
-  category        String   @default("Other")
-  messageType     String   @default("text") // text, image, video, flex, carousel, multi
-  messages        Json     @default("[]")
-  content         String   @default("[]") // legacy serialized payload
-  imageUrl        String?
-  isActive        Boolean  @default(true)
-  usageCount      Int      @default(0)
+  id          String  @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  category    String  @default("Other")
+  messageType String  @default("text") // text, image, video, flex, carousel, multi
+  messages    Json    @default("[]")
+  content     String  @default("[]") // legacy serialized payload
+  imageUrl    String?
+  isActive    Boolean @default(true)
+  usageCount  Int     @default(0)
 
   // Relations
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  broadcasts      Broadcast[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcasts   Broadcast[]
+  autoMessages AutoMessage[]
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([userId, category])
@@ -215,28 +217,57 @@ model MessageTemplate {
 }
 
 // ============================================================================
+// Auto Messages (keyword / postback reply)
+// ============================================================================
+
+model AutoMessage {
+  id           String  @id @default(cuid())
+  userId       String
+  name         String
+  keyword      String // matched against postback data
+  matchType    String  @default("exact") // exact | contains
+  templateId   String
+  priority     Int     @default(0) // lower = higher priority
+  isActive     Boolean @default(true)
+  triggerCount Int     @default(0)
+
+  // Relations
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, keyword])
+  @@index([userId])
+  @@index([userId, isActive])
+  @@index([userId, priority])
+  @@map("auto_messages")
+}
+
+// ============================================================================
 // Rich Menu
 // ============================================================================
 
 model RichMenu {
-  id              String   @id @default(cuid())
-  lineAccountId   String
-  name            String
-  imageUrl        String?
-  lineRichMenuId  String?  @unique
-  menuType        String   @default("default") // default (guest) | member
-  chatBarText     String   @default("Menu")
-  selected        Boolean  @default(false)
-  sizeWidth       Int      @default(2500)
-  sizeHeight      Int      @default(1686)
-  areas           Json     @default("[]")
-  isActive        Boolean  @default(false)
-  
+  id             String  @id @default(cuid())
+  lineAccountId  String
+  name           String
+  imageUrl       String?
+  lineRichMenuId String? @unique
+  menuType       String  @default("default") // default (guest) | member
+  chatBarText    String  @default("Menu")
+  selected       Boolean @default(false)
+  sizeWidth      Int     @default(2500)
+  sizeHeight     Int     @default(1686)
+  areas          Json    @default("[]")
+  isActive       Boolean @default(false)
+
   // Relations
-  lineAccount     LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lineAccount LineAccount @relation(fields: [lineAccountId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([lineAccountId])
   @@index([lineAccountId, menuType])
@@ -248,16 +279,16 @@ model RichMenu {
 // ============================================================================
 
 model WebhookEvent {
-  id              String   @id @default(cuid())
-  lineUserId      String
-  eventType       String   // follow, unfollow, message, postback
-  eventData       Json
-  processed       Boolean  @default(false)
-  
+  id         String  @id @default(cuid())
+  lineUserId String
+  eventType  String // follow, unfollow, message, postback
+  eventData  Json
+  processed  Boolean @default(false)
+
   // Relations
-  lineUser        LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
-  
-  createdAt       DateTime @default(now())
+  lineUser LineUser @relation(fields: [lineUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
 
   @@index([lineUserId])
   @@index([eventType])
