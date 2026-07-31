@@ -26,6 +26,7 @@ model User {
   broadcasts   Broadcast[]
   templates    MessageTemplate[]
   autoMessages AutoMessage[]
+  audiences    Audience[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -131,6 +132,30 @@ model Message {
 
   @@index([lineUserId])
   @@map("messages")
+}
+
+// ============================================================================
+// Audiences (broadcast targeting segments)
+// ============================================================================
+
+model Audience {
+  id          String  @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  type        String // all | user_type | active | new | segment
+  criteria    Json    @default("{}")
+  isActive    Boolean @default(true)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@map("audiences")
 }
 
 // ============================================================================
