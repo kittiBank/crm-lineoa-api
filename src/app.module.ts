@@ -14,6 +14,7 @@ import { RichMenuModule } from './modules/rich-menu/rich-menu.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { MemberLoginModule } from './modules/member-login/member-login.module';
 import { AutoMessagesModule } from './modules/auto-messages/auto-messages.module';
+import { AudiencesModule } from './modules/audiences/audiences.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
@@ -35,6 +36,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
     TemplatesModule,
     MemberLoginModule,
     AutoMessagesModule,
+    AudiencesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
