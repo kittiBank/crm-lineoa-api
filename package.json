@@ -24,12 +24,17 @@
     "typeorm": "typeorm-ts-node-esm",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "tunnel:up": "docker compose -f docker-compose.tunnel.yml up -d",
     "tunnel:down": "docker compose -f docker-compose.tunnel.yml down",
-    "tunnel:logs": "docker compose -f docker-compose.tunnel.yml logs -f tunnel-api tunnel-minio"
+    "tunnel:logs": "docker compose -f docker-compose.tunnel.yml logs -f tunnel-api tunnel-minio",
+    "docker:prod:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:prod:up": "docker compose -f docker-compose.prod.yml up -d --build",
+    "docker:prod:down": "docker compose -f docker-compose.prod.yml down",
+    "docker:prod:logs": "docker compose -f docker-compose.prod.yml logs -f api worker"
   },
   "dependencies": {
     "@line/bot-sdk": "^8.4.0",
