@@ -16,37 +16,67 @@ async function bootstrap() {
   app.useLogger(logger);
 
   // CORS Configuration
-  const allowedOrigins = [
+  // FRONTEND_URL / CORS_ORIGINS must include the browser origin exactly
+  // e.g. https://crm-web.vortex-dev.com (no trailing slash)
+  const allowedOrigins = new Set<string>([
     'http://localhost:3000',
     'http://localhost:3001',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
-  ];
+  ]);
 
-  // Add production frontend URL if configured
-  if (process.env.FRONTEND_URL) {
-    allowedOrigins.push(process.env.FRONTEND_URL);
-  }
-
-  // LIFF endpoint may be served from a public tunnel / custom domain
-  if (process.env.LIFF_ENDPOINT_URL) {
+  const addOrigin = (value?: string) => {
+    if (!value?.trim()) return;
     try {
-      allowedOrigins.push(new URL(process.env.LIFF_ENDPOINT_URL).origin);
+      allowedOrigins.add(new URL(value.trim()).origin);
     } catch {
       // ignore invalid URL
     }
+  };
+
+  addOrigin(process.env.FRONTEND_URL);
+
+  // Comma-separated list, e.g. https://crm-web.vortex-dev.com,https://main.xxx.amplifyapp.com
+  for (const origin of (process.env.CORS_ORIGINS || '').split(',')) {
+    addOrigin(origin);
   }
 
+  // LIFF endpoint may be served from a public tunnel / custom domain
+  addOrigin(process.env.LIFF_ENDPOINT_URL);
+
+  const originList = [...allowedOrigins];
+  logger.log(`CORS allowed origins: ${originList.join(', ')}`, 'Bootstrap');
+
   app.enableCors({
-    origin: allowedOrigins,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // Non-browser clients (curl, server-to-server) send no Origin
+      if (!origin || originList.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    optionsSuccessStatus: 200,
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+    ],
+    optionsSuccessStatus: 204,
   });
 
-  // Security
-  app.use(helmet());
+  // Security — allow cross-origin API responses for browser clients
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(compression());
 
   // Global prefix
@@ -77,7 +107,10 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  logger.log(`Application is running on: http://localhost:${port}`, 'Bootstrap');
+  logger.log(
+    `Application is running on: http://localhost:${port}`,
+    'Bootstrap',
+  );
 }
 
 bootstrap().catch((err) => {
