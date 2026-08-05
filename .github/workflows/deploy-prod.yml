@@ -1,0 +1,115 @@
+name: Deploy Production
+
+# Flow: merge to main → create semver tag (v*.*.*) → auto deploy to EC2
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]*'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy API to EC2
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+
+      - name: Validate tag format
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Invalid tag '${TAG}'. Use semver, e.g. v1.0.0 or v1.2.3-rc.1"
+            exit 1
+          fi
+          echo "Deploying tag: ${TAG}"
+
+      - name: Render production .env
+        env:
+          DEPLOY_TAG: ${{ github.ref_name }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          LINE_BOT_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_BOT_CHANNEL_ACCESS_TOKEN }}
+          LINE_BOT_CHANNEL_SECRET: ${{ secrets.LINE_BOT_CHANNEL_SECRET }}
+          # Optional — leave unset in GitHub to keep prod defaults in render-env.sh
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          LIFF_ENDPOINT_URL: ${{ secrets.LIFF_ENDPOINT_URL }}
+          MINIO_PUBLIC_URL: ${{ secrets.MINIO_PUBLIC_URL }}
+          RABBITMQ_USER: ${{ secrets.RABBITMQ_USER }}
+          RABBITMQ_PASS: ${{ secrets.RABBITMQ_PASS }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+        run: |
+          export DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          chmod +x scripts/deploy/render-env.sh
+          scripts/deploy/render-env.sh > .env.deploy
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Prepare remote app directory
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+        run: |
+          APP_DIR="${EC2_APP_DIR:-/home/${EC2_USER}/crm-lineoa-api}"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "mkdir -p '${APP_DIR}'"
+
+      - name: Sync application to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+        run: |
+          APP_DIR="${EC2_APP_DIR:-/home/${EC2_USER}/crm-lineoa-api}"
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            --exclude 'coverage/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude '.pnpm-store/' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            ./ "${EC2_USER}@${EC2_HOST}:${APP_DIR}/"
+
+      - name: Upload .env and run deploy
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          APP_DIR="${EC2_APP_DIR:-/home/${EC2_USER}/crm-lineoa-api}"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            .env.deploy "${EC2_USER}@${EC2_HOST}:${APP_DIR}/.env"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "chmod +x '${APP_DIR}/scripts/deploy/remote-deploy.sh' && \
+             APP_DIR='${APP_DIR}' IMAGE_TAG='${IMAGE_TAG}' bash '${APP_DIR}/scripts/deploy/remote-deploy.sh'"
+
+      - name: Post-deploy smoke test
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "curl -sf http://127.0.0.1:3000/api/v1 >/dev/null && echo 'Smoke test passed'"
