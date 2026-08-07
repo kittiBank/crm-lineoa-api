@@ -85,7 +85,7 @@ export class RichMenuController {
   @ApiOperation({
     summary: 'Create and publish a rich menu',
     description:
-      'Uploads image to MinIO, creates a rich menu on LINE, and sets as default (guest) when menuType is default',
+      'Uploads image to object storage (S3/MinIO), creates a rich menu on LINE, and sets as default (guest) when menuType is default',
   })
   @ApiBody({
     schema: {
