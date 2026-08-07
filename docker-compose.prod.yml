@@ -1,5 +1,6 @@
 # Production-style stack for a single AWS EC2 host.
 # Postgres lives on RDS — do not start a local postgres service here.
+# Object storage uses AWS S3 (credentials via .env from CI secrets).
 #
 # Usage (on EC2, with a filled .env):
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -19,19 +20,11 @@ services:
       RUN_MIGRATIONS: 'true'
       # In-compose service hostnames (override localhost from local .env)
       AMQP_URL: ${AMQP_URL:-amqp://crm:changeme@rabbitmq:5672}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
-      MINIO_PORT: ${MINIO_PORT:-9000}
-      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-crm-lineoa}
     ports:
       - '${API_HOST_PORT:-3000}:3000'
     depends_on:
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_started
     networks:
       - crm_network
     healthcheck:
@@ -60,12 +53,6 @@ services:
       NODE_ENV: production
       RUN_MIGRATIONS: 'false'
       AMQP_URL: ${AMQP_URL:-amqp://crm:changeme@rabbitmq:5672}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
-      MINIO_PORT: ${MINIO_PORT:-9000}
-      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-crm-lineoa}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -92,47 +79,8 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:latest
-    container_name: crm_lineoa_minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      # Public object URLs (tighten with Nginx / security group later)
-      - '${MINIO_HOST_PORT:-9000}:9000'
-    volumes:
-      - minio_data:/data
-    networks:
-      - crm_network
-
-  minio-init:
-    image: minio/mc:latest
-    container_name: crm_lineoa_minio_init
-    depends_on:
-      minio:
-        condition: service_started
-    entrypoint: >
-      /bin/sh -c "
-      sleep 3 &&
-      mc alias set crm http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
-      mc mb crm/$$MINIO_BUCKET --ignore-existing &&
-      mc anonymous set download crm/$$MINIO_BUCKET &&
-      exit 0
-      "
-    environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-crm-lineoa}
-    networks:
-      - crm_network
-    restart: 'no'
-
 volumes:
   rabbitmq_data:
-  minio_data:
 
 networks:
   crm_network:

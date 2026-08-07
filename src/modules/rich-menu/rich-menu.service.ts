@@ -92,11 +92,13 @@ export class RichMenuService {
       }
     }
 
-    const storageKey = this.extractStorageKey(menu.imageUrl);
+    const storageKey = this.storageService.extractKeyFromPublicUrl(
+      menu.imageUrl,
+    );
     if (storageKey) {
       await this.storageService.delete(storageKey).catch((error) => {
         this.logger.warn(
-          `Failed to delete MinIO object "${storageKey}": ${
+          `Failed to delete storage object "${storageKey}": ${
             error instanceof Error ? error.message : error
           }`,
         );
@@ -172,7 +174,7 @@ export class RichMenuService {
         }`,
       );
       throw new BadRequestException(
-        'Failed to upload rich menu image to storage. Ensure MinIO is running.',
+        'Failed to upload rich menu image to storage. Check S3/MinIO configuration.',
       );
     }
 
@@ -204,7 +206,7 @@ export class RichMenuService {
     } catch (error) {
       await this.storageService.delete(storageKey).catch((deleteError) => {
         this.logger.warn(
-          `Failed to clean up MinIO object "${storageKey}": ${
+          `Failed to clean up storage object "${storageKey}": ${
             deleteError instanceof Error ? deleteError.message : deleteError
           }`,
         );
@@ -334,22 +336,6 @@ export class RichMenuService {
       channelAccessToken: lineAccount.channelAccessToken,
       channelSecret: lineAccount.channelSecret,
     });
-  }
-
-  private extractStorageKey(imageUrl: string | null | undefined): string | null {
-    if (!imageUrl) {
-      return null;
-    }
-
-    const bucket = this.configService.get<string>('MINIO_BUCKET', 'crm-lineoa');
-    const marker = `/${bucket}/`;
-    const markerIndex = imageUrl.indexOf(marker);
-
-    if (markerIndex === -1) {
-      return null;
-    }
-
-    return imageUrl.slice(markerIndex + marker.length);
   }
 
   private buildLineAction(

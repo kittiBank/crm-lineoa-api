@@ -44,11 +44,13 @@ jobs:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
           LIFF_ENDPOINT_URL: ${{ secrets.LIFF_ENDPOINT_URL }}
-          MINIO_PUBLIC_URL: ${{ secrets.MINIO_PUBLIC_URL }}
           RABBITMQ_USER: ${{ secrets.RABBITMQ_USER }}
           RABBITMQ_PASS: ${{ secrets.RABBITMQ_PASS }}
-          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
-          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+          S3_PUBLIC_URL: ${{ vars.S3_PUBLIC_URL }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_REGION: ${{ vars.S3_REGION }}
         run: |
           export DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           chmod +x scripts/deploy/render-env.sh
