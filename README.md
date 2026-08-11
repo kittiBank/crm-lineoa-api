@@ -263,6 +263,58 @@ npm run db:studio
 
 This opens an interactive database browser.
 
+## Local Observability (Grafana + Prometheus)
+
+Monitor CPU/RAM/DISK/Network, API traffic, live HTTP logs, and worker jobs locally.
+
+### Stack
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Grafana | http://localhost:3030 | Dashboard (admin / admin) |
+| Prometheus | http://localhost:9090 | Metrics storage |
+| Node Exporter | http://localhost:9100/metrics | Host CPU/RAM/Disk/Network |
+| Loki | http://localhost:3100 | Log aggregation |
+
+### Quick start
+
+1. Add to `.env`:
+```env
+OBS_LOG_DIR=./logs
+OBS_LOKI_URL=http://localhost:3100
+```
+
+> **Note:** API default port is `3000`. If your frontend uses 3000, run API on `PORT=3001` and ensure `observability/prometheus/prometheus.yml` scrapes the same port.
+
+2. Start infra + observability:
+```bash
+docker compose up -d
+npm run obs:up
+```
+
+3. Start API and worker (separate terminals):
+```bash
+npm run start:dev
+npm run start:worker
+```
+
+4. Open Grafana → **CRM** folder → **CRM Production Monitor**
+
+5. ดู log ย้อนหลัง → **CRM Logs** (แยกกลุ่ม API / Worker, เลือก time range มุมขวาบน)
+
+6. Generate traffic (optional):
+```bash
+curl http://localhost:3000/api/v1/
+curl http://localhost:3000/metrics
+```
+
+### Metrics endpoints
+
+- API: `http://localhost:3000/metrics`
+- Worker: `http://localhost:9465/metrics`
+
+Prometheus scrapes the host via `host.docker.internal` (Docker Desktop). On Linux, replace with `172.17.0.1` or your host IP in `observability/prometheus/prometheus.yml`.
+
 ## Testing
 
 Run the test suite:

@@ -12,3 +12,22 @@ scrape_configs:
       - targets: ['node-exporter:9100']
         labels:
           instance: local
+
+  # API runs on host — default PORT=3000; this project often uses 3001 (frontend on 3000)
+  - job_name: crm-api
+    metrics_path: /metrics
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+        labels:
+          service: api
+          environment: local
+
+  - job_name: crm-worker
+    metrics_path: /metrics
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['host.docker.internal:9465']
+        labels:
+          service: worker
+          environment: local

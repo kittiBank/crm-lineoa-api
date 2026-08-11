@@ -79,8 +79,10 @@ async function bootstrap() {
   );
   app.use(compression());
 
-  // Global prefix
-  app.setGlobalPrefix(process.env.API_PREFIX || 'api/v1');
+  // Global prefix — keep /metrics outside prefix for Prometheus
+  app.setGlobalPrefix(process.env.API_PREFIX || 'api/v1', {
+    exclude: ['metrics'],
+  });
 
   // Global validation pipe
   app.useGlobalPipes(

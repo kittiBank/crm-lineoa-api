@@ -11,6 +11,7 @@ import {
   AUTO_REPLY_QUEUE,
   AutoReplyQueueMessage,
 } from '../queue/queue.constants';
+import { MetricsService } from '@/common/metrics/metrics.service';
 
 type AmqpChannel = {
   assertQueue(queue: string, options?: { durable?: boolean }): Promise<void>;
@@ -35,6 +36,7 @@ export class AutoReplyConsumerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly autoReplyService: AutoReplyService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   async onModuleInit() {
@@ -77,8 +79,11 @@ export class AutoReplyConsumerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    await this.metricsService.startJob(AUTO_REPLY_QUEUE);
+
     try {
       await this.autoReplyService.processAutoReply(payload);
+      await this.metricsService.finishJob(AUTO_REPLY_QUEUE, true);
       channel.ack(message);
     } catch (error) {
       const errorMessage =
@@ -86,6 +91,7 @@ export class AutoReplyConsumerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `Failed to process auto-reply for "${payload.matchInput}": ${errorMessage}`,
       );
+      await this.metricsService.finishJob(AUTO_REPLY_QUEUE, false);
       channel.ack(message);
     }
   }

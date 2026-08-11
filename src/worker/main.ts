@@ -1,13 +1,20 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger } from '@nestjs/common';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { WorkerModule } from './worker.module';
+import { startMetricsServer } from '@/common/metrics/metrics-server';
 
 async function bootstrap() {
-  const logger = new Logger('WorkerBootstrap');
-  await NestFactory.createApplicationContext(WorkerModule, {
-    logger: ['error', 'warn', 'log'],
+  const app = await NestFactory.createApplicationContext(WorkerModule, {
+    bufferLogs: true,
   });
-  logger.log('Broadcast worker started');
+
+  const logger = app.get(WINSTON_MODULE_NEST_PROVIDER);
+  app.useLogger(logger);
+
+  const metricsPort = Number(process.env.WORKER_METRICS_PORT || 9465);
+  startMetricsServer(metricsPort);
+
+  logger.log('Broadcast worker started', 'WorkerBootstrap');
 }
 
 bootstrap().catch((error) => {

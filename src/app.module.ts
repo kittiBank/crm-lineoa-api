@@ -17,6 +17,7 @@ import { AutoMessagesModule } from './modules/auto-messages/auto-messages.module
 import { AudiencesModule } from './modules/audiences/audiences.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
+import { MetricsModule } from './common/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
       isGlobal: true,
       envFilePath: '.env',
     }),
+    MetricsModule,
     WinstonModule.forRoot(winstonConfig),
     PrismaModule,
     AuthModule,

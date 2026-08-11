@@ -12,6 +12,7 @@ import {
   BROADCAST_SEND_QUEUE,
   BroadcastQueueMessage,
 } from '../queue/queue.constants';
+import { MetricsService } from '@/common/metrics/metrics.service';
 
 type AmqpChannel = {
   assertQueue(queue: string, options?: { durable?: boolean }): Promise<void>;
@@ -37,6 +38,7 @@ export class BroadcastConsumerService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly broadcastDeliveryService: BroadcastDeliveryService,
     private readonly prisma: PrismaService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   async onModuleInit() {
@@ -79,11 +81,14 @@ export class BroadcastConsumerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    await this.metricsService.startJob(BROADCAST_SEND_QUEUE);
+
     try {
       await this.broadcastDeliveryService.deliverBroadcast(
         payload.userId,
         payload.broadcastId,
       );
+      await this.metricsService.finishJob(BROADCAST_SEND_QUEUE, true);
       this.logger.log(`Processed broadcast ${payload.broadcastId}`);
       channel.ack(message);
     } catch (error) {
@@ -94,6 +99,7 @@ export class BroadcastConsumerService implements OnModuleInit, OnModuleDestroy {
       );
 
       await this.markBroadcastFailed(payload.broadcastId);
+      await this.metricsService.finishJob(BROADCAST_SEND_QUEUE, false);
       channel.ack(message);
     }
   }
