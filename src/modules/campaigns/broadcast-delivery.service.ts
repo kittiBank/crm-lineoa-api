@@ -6,12 +6,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { LineService } from '../line/line.service';
+import { StorageService } from '../storage/storage.service';
 import {
   buildLineMessages,
   parseTemplateMessageBlocks,
 } from './line-message.builder';
 
 const MULTICAST_BATCH_SIZE = 500;
+const BROADCAST_MEDIA_TTL_SECONDS = 60 * 60 * 24;
 
 @Injectable()
 export class BroadcastDeliveryService {
@@ -20,6 +22,7 @@ export class BroadcastDeliveryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly lineService: LineService,
+    private readonly storageService: StorageService,
   ) {}
 
   async deliverBroadcast(userId: string, broadcastId: string) {
@@ -56,9 +59,11 @@ export class BroadcastDeliveryService {
       );
     }
 
-    const messageBlocks = parseTemplateMessageBlocks(
-      broadcast.template.messages,
-      broadcast.template.content,
+    const messageBlocks = await this.withAccessibleMediaUrls(
+      parseTemplateMessageBlocks(
+        broadcast.template.messages,
+        broadcast.template.content,
+      ),
     );
     const lineMessages = buildLineMessages(messageBlocks);
 
@@ -258,5 +263,40 @@ export class BroadcastDeliveryService {
 
   private getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private async withAccessibleMediaUrls(
+    messages: ReturnType<typeof parseTemplateMessageBlocks>,
+  ) {
+    return Promise.all(
+      messages.map(async (message) => ({
+        ...message,
+        imageUrl: message.imageUrl
+          ? await this.storageService.resolveAccessibleUrl(
+              message.imageUrl,
+              BROADCAST_MEDIA_TTL_SECONDS,
+            )
+          : message.imageUrl,
+        previewImageUrl: message.previewImageUrl
+          ? await this.storageService.resolveAccessibleUrl(
+              message.previewImageUrl,
+              BROADCAST_MEDIA_TTL_SECONDS,
+            )
+          : message.previewImageUrl,
+        columns: message.columns
+          ? await Promise.all(
+              message.columns.map(async (column) => ({
+                ...column,
+                imageUrl: column.imageUrl
+                  ? await this.storageService.resolveAccessibleUrl(
+                      column.imageUrl,
+                      BROADCAST_MEDIA_TTL_SECONDS,
+                    )
+                  : column.imageUrl,
+              })),
+            )
+          : message.columns,
+      })),
+    );
   }
 }

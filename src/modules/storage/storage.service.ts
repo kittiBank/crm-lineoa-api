@@ -37,6 +37,12 @@ export class StorageService implements OnModuleInit {
       this.configService.get<string>('S3_AUTO_CREATE_BUCKET', 'false') ===
       'true';
 
+    // AWS virtual-hosted public URLs need pathStyle=false so presigned URLs
+    // match https://{bucket}.s3.{region}.amazonaws.com/...
+    const useVirtualHostedStyle =
+      this.publicUrl.includes(`${this.bucket}.s3.`) ||
+      this.publicUrl.includes(`${this.bucket}.s3-`);
+
     this.client = new Minio.Client({
       endPoint: endpoint,
       port,
@@ -44,6 +50,7 @@ export class StorageService implements OnModuleInit {
       accessKey: this.configService.get<string>('S3_ACCESS_KEY', 'minioadmin'),
       secretKey: this.configService.get<string>('S3_SECRET_KEY', 'minioadmin'),
       region,
+      pathStyle: !useVirtualHostedStyle,
     });
   }
 
@@ -111,12 +118,45 @@ export class StorageService implements OnModuleInit {
     return this.client.presignedGetObject(this.bucket, key, expirySeconds);
   }
 
+  /**
+   * Return a browser/LINE-accessible URL for a stored object URL.
+   * Falls back to the original URL when it is not from our bucket.
+   */
+  async resolveAccessibleUrl(
+    imageUrl: string,
+    expirySeconds = 3600,
+  ): Promise<string> {
+    const key = this.extractKeyFromPublicUrl(imageUrl);
+    if (!key) {
+      return imageUrl;
+    }
+
+    try {
+      return await this.getPresignedUrl(key, expirySeconds);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to presign "${key}": ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      return imageUrl;
+    }
+  }
+
+  /**
+   * Normalize a (possibly presigned) storage URL back to the stable public URL.
+   */
+  toStablePublicUrl(imageUrl: string): string {
+    const key = this.extractKeyFromPublicUrl(imageUrl);
+    return key ? this.getPublicUrl(key) : imageUrl;
+  }
+
   getPublicUrl(key: string): string {
     return `${this.publicUrl}/${key}`;
   }
 
   /**
-   * Recover object key from a previously stored public URL.
+   * Recover object key from a previously stored public or presigned URL.
    * Supports virtual-hosted (S3) and path-style (MinIO) URLs.
    */
   extractKeyFromPublicUrl(imageUrl: string | null | undefined): string | null {
@@ -124,24 +164,28 @@ export class StorageService implements OnModuleInit {
       return null;
     }
 
-    const normalized = imageUrl.trim();
+    const normalized = imageUrl.trim().split('?')[0].split('#')[0];
     const publicPrefix = `${this.publicUrl}/`;
     if (normalized.startsWith(publicPrefix)) {
-      return normalized.slice(publicPrefix.length) || null;
+      return decodeURIComponent(normalized.slice(publicPrefix.length)) || null;
     }
 
     const pathStyleMarker = `/${this.bucket}/`;
     const markerIndex = normalized.indexOf(pathStyleMarker);
     if (markerIndex !== -1) {
-      return normalized.slice(markerIndex + pathStyleMarker.length) || null;
+      return (
+        decodeURIComponent(
+          normalized.slice(markerIndex + pathStyleMarker.length),
+        ) || null
+      );
     }
 
     try {
       const pathname = new URL(normalized).pathname.replace(/^\/+/, '');
       if (pathname.startsWith(`${this.bucket}/`)) {
-        return pathname.slice(this.bucket.length + 1) || null;
+        return decodeURIComponent(pathname.slice(this.bucket.length + 1)) || null;
       }
-      return pathname || null;
+      return null;
     } catch {
       return null;
     }

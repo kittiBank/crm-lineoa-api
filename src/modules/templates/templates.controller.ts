@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,10 +8,15 @@ import {
   Patch,
   Post,
   Request,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -33,6 +39,46 @@ export class TemplatesController {
   @ApiOkResponse({ description: 'Template list' })
   async findAll(@Request() req: { user: { id: string } }) {
     return this.templatesService.findAll(req.user.id);
+  }
+
+  @Post('media')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload a template image to object storage',
+    description:
+      'Uploads an image to S3/MinIO and returns a public URL for use in message templates',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['image'],
+      properties: {
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiCreatedResponse({ description: 'Image uploaded' })
+  async uploadMedia(
+    @Request() req: { user: { id: string } },
+    @UploadedFile()
+    image:
+      | {
+          buffer: Buffer;
+          mimetype: string;
+          originalname?: string;
+        }
+      | undefined,
+  ) {
+    if (!image) {
+      throw new BadRequestException('Image file is required');
+    }
+
+    return this.templatesService.uploadImage(req.user.id, image);
   }
 
   @Get(':id')
