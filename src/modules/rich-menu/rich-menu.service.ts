@@ -32,10 +32,12 @@ export class RichMenuService {
       return [];
     }
 
-    return this.prisma.richMenu.findMany({
+    const menus = await this.prisma.richMenu.findMany({
       where: { lineAccountId: lineAccount.id },
       orderBy: { createdAt: 'desc' },
     });
+
+    return Promise.all(menus.map((menu) => this.toResponse(menu)));
   }
 
   async findOne(userId: string, richMenuId: string) {
@@ -57,7 +59,7 @@ export class RichMenuService {
       throw new NotFoundException('Rich menu not found');
     }
 
-    return menu;
+    return this.toResponse(menu);
   }
 
   async remove(userId: string, richMenuId: string) {
@@ -248,6 +250,11 @@ export class RichMenuService {
       `Rich menu created: ${lineRichMenuId} (${dto.menuType}) for user ${userId}`,
     );
 
+    const accessibleImageUrl = await this.storageService.resolveAccessibleUrl(
+      imageUrl,
+      60 * 60,
+    );
+
     return {
       id: savedMenu?.id,
       lineRichMenuId,
@@ -255,7 +262,7 @@ export class RichMenuService {
       menuType: dto.menuType,
       chatBarText: dto.chatBarText,
       layoutId: dto.layoutId,
-      imageUrl,
+      imageUrl: accessibleImageUrl,
       isActive: true,
       appliedAsDefault: dto.menuType === 'default',
     };
@@ -336,6 +343,20 @@ export class RichMenuService {
       channelAccessToken: lineAccount.channelAccessToken,
       channelSecret: lineAccount.channelSecret,
     });
+  }
+
+  private async toResponse<T extends { imageUrl: string | null }>(menu: T) {
+    if (!menu.imageUrl) {
+      return menu;
+    }
+
+    return {
+      ...menu,
+      imageUrl: await this.storageService.resolveAccessibleUrl(
+        menu.imageUrl,
+        60 * 60,
+      ),
+    };
   }
 
   private buildLineAction(
