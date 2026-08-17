@@ -15,6 +15,7 @@ import { TemplatesModule } from './modules/templates/templates.module';
 import { MemberLoginModule } from './modules/member-login/member-login.module';
 import { AutoMessagesModule } from './modules/auto-messages/auto-messages.module';
 import { AudiencesModule } from './modules/audiences/audiences.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { winstonConfig } from './config/winston.config';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 import { MetricsModule } from './common/metrics/metrics.module';
@@ -39,6 +40,7 @@ import { MetricsModule } from './common/metrics/metrics.module';
     MemberLoginModule,
     AutoMessagesModule,
     AudiencesModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
