@@ -1,4 +1,5 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class VerifyLineDto {
@@ -27,15 +28,15 @@ export class VerifyLineDto {
   })
   name?: string;
 
-  @IsString()
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
   @ApiProperty({
     description: 'Save credentials to database',
-    example: 'true',
+    example: true,
     required: false,
-    enum: ['true', 'false'],
   })
-  saveToDb?: string;
+  saveToDb?: boolean;
 
   @IsString()
   @IsOptional()

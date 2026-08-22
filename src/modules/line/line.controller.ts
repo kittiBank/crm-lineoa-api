@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   BadRequestException,
+  HttpException,
   UseGuards,
   Request,
   Req,
@@ -30,7 +31,7 @@ export class LineController {
   constructor(
     private lineService: LineService,
     private configService: ConfigService,
-  ) {}
+  ) { }
 
   @Post('webhook')
   @ApiOperation({
@@ -94,6 +95,59 @@ export class LineController {
     return this.lineService.findLineUserById(req.user.id, id);
   }
 
+  @Get('account')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get the current user LINE Official Account and saved OA info',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'LINE account if connected, otherwise connected=false',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLineAccount(@Request() req: { user: { id: string } }) {
+    return this.lineService.getLineAccountForUser(req.user.id);
+  }
+
+  @Post('account/test')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Test connection using the saved LINE account credentials',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Saved LINE Bot connection verified successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Failed to verify connection' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'LINE account not found' })
+  async testSavedConnection(@Request() req: { user: { id: string } }) {
+    try {
+      const verifyResult = await this.lineService.testSavedConnection(
+        req.user.id,
+      );
+
+      return {
+        status: 'verified',
+        botUserId: verifyResult.botUserId,
+        botDisplayName: verifyResult.botDisplayName,
+        oaInfo: verifyResult.oaInfo,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new BadRequestException(
+        error instanceof Error
+          ? error.message
+          : 'Failed to verify LINE connection',
+      );
+    }
+  }
+
   @Post('verify')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -134,8 +188,7 @@ export class LineController {
         verifyLineDto.channelSecret,
       );
 
-      // Check if should save to DB
-      const shouldSave = verifyLineDto.saveToDb === 'true';
+      const shouldSave = verifyLineDto.saveToDb === true;
       let savedAccount: any = null;
 
       if (shouldSave) {
@@ -144,12 +197,13 @@ export class LineController {
           throw new BadRequestException('User ID not found in JWT context');
         }
 
-        const accountName = verifyLineDto.name || verifyLineDto.botDisplayName || 'LINE Bot';
+        const accountName = verifyLineDto.name || verifyResult.botDisplayName || 'LINE Bot';
         savedAccount = await this.lineService.saveLineAccount(
           userId,
           verifyLineDto.channelAccessToken,
           verifyLineDto.channelSecret,
           accountName,
+          verifyResult.oaInfo,
         );
       }
 
@@ -157,6 +211,7 @@ export class LineController {
         status: 'verified',
         botUserId: verifyResult.botUserId,
         botDisplayName: verifyResult.botDisplayName,
+        oaInfo: verifyResult.oaInfo,
         saved: shouldSave,
         ...(shouldSave && { account: savedAccount }),
       };
