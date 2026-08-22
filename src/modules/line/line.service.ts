@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LineAccountRepository } from './repositories/line-account.repository';
 import * as line from '@line/bot-sdk';
@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryLineUsersDto } from './dto/query-line-users.dto';
+import { UpsertLineAccountDto } from './dto/verify-line.dto';
 import { AutoReplyQueueService } from '@/queue/auto-reply-queue.service';
 import { LineOaInfo, LineOaInfoFields, StoredLineOaInfo } from './types/line-oa-info';
 
@@ -638,10 +639,23 @@ export class LineService {
     });
   }
 
-  async getLineAccountForUser(userId: string) {
-    const account =
-      await this.lineAccountRepository.getLineAccountByUserId(userId);
+  private maskSecret(value: string | null | undefined) {
+    if (!value) {
+      return undefined;
+    }
 
+    if (value.length <= 4) {
+      return '••••';
+    }
+
+    return `••••${value.slice(-4)}`;
+  }
+
+  private toSettingsAccount(
+    account: Awaited<
+      ReturnType<LineAccountRepository['getLineAccountByUserId']>
+    >,
+  ) {
     if (!account) {
       return { connected: false as const };
     }
@@ -650,34 +664,69 @@ export class LineService {
       connected: true as const,
       id: account.id,
       name: account.name,
-      channelAccessToken: account.channelAccessToken,
-      channelSecret: account.channelSecret,
-      createdAt: account.createdAt,
-      updatedAt: account.updatedAt,
+      hasCredentials: Boolean(
+        account.channelAccessToken && account.channelSecret,
+      ),
+      channelAccessTokenMasked: this.maskSecret(account.channelAccessToken),
+      channelSecretMasked: this.maskSecret(account.channelSecret),
       oaInfo: this.mapStoredOaInfo(account),
     };
   }
 
-  async testSavedConnection(userId: string) {
+  async getLineAccountForUser(userId: string) {
     const account =
       await this.lineAccountRepository.getLineAccountByUserId(userId);
 
-    if (!account) {
-      throw new NotFoundException('LINE account not found');
+    return this.toSettingsAccount(account);
+  }
+
+  async upsertLineAccount(userId: string, dto: UpsertLineAccountDto) {
+    const saved = await this.lineAccountRepository.getLineAccountByUserId(
+      userId,
+    );
+    const token = dto.channelAccessToken?.trim() || saved?.channelAccessToken;
+    const secret = dto.channelSecret?.trim() || saved?.channelSecret;
+
+    if (!token || !secret) {
+      throw new BadRequestException(
+        'LINE credentials are required. Provide them on first connect, or save an account first.',
+      );
     }
 
-    const result = await this.verifyConnection(
-      account.channelAccessToken,
-      account.channelSecret,
-      { lineAccountId: account.id },
+    const result = await this.verifyConnection(token, secret, {
+      lineAccountId: saved?.id,
+    });
+
+    if (dto.action === 'save') {
+      await this.saveLineAccount(
+        userId,
+        token,
+        secret,
+        dto.name || result.botDisplayName || saved?.name || 'LINE Account',
+        result.oaInfo,
+      );
+    } else if (saved) {
+      await this.lineAccountRepository.updateOaInfo(
+        saved.id,
+        this.toOaInfoFields(result.oaInfo),
+      );
+    }
+
+    const account = await this.lineAccountRepository.getLineAccountByUserId(
+      userId,
     );
 
-    await this.lineAccountRepository.updateOaInfo(
-      account.id,
-      this.toOaInfoFields(result.oaInfo),
-    );
+    return {
+      ...this.toSettingsAccount(account),
+      status: 'verified' as const,
+      saved: dto.action === 'save',
+      name: account?.name ?? result.botDisplayName,
+      oaInfo: result.oaInfo,
+    };
+  }
 
-    return result;
+  async testSavedConnection(userId: string) {
+    return this.upsertLineAccount(userId, { action: 'test' });
   }
 
   async findLineUsers(userId: string, query: QueryLineUsersDto) {
