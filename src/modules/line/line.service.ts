@@ -7,6 +7,7 @@ import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { QueryLineUsersDto } from './dto/query-line-users.dto';
 import { AutoReplyQueueService } from '@/queue/auto-reply-queue.service';
+import { LineOaInfo, LineOaInfoFields, StoredLineOaInfo } from './types/line-oa-info';
 
 @Injectable()
 export class LineService {
@@ -265,8 +266,7 @@ export class LineService {
       await client.unlinkRichMenuFromUser(platformLineUserId);
     } catch (error) {
       this.logger.warn(
-        `Failed to unlink rich menu for ${platformLineUserId}: ${
-          error instanceof Error ? error.message : error
+        `Failed to unlink rich menu for ${platformLineUserId}: ${error instanceof Error ? error.message : error
         }`,
       );
     }
@@ -451,21 +451,25 @@ export class LineService {
   async verifyConnection(
     channelAccessToken: string,
     channelSecret: string,
-  ): Promise<{ status: string; botUserId: string; botDisplayName: string }> {
+    options?: { lineAccountId?: string },
+  ): Promise<{
+    status: string;
+    botUserId: string;
+    botDisplayName: string;
+    oaInfo: LineOaInfo;
+  }> {
     try {
-      // Create temporary client with provided credentials
-      const tempClient = new line.Client({
+      const oaInfo = await this.fetchLineOaInfo(
         channelAccessToken,
         channelSecret,
-      });
-
-      // Get bot info to verify connection
-      const botInfo = await tempClient.getBotInfo();
+        options,
+      );
 
       return {
         status: 'ok',
-        botUserId: botInfo.userId,
-        botDisplayName: botInfo.displayName,
+        botUserId: oaInfo.botUserId,
+        botDisplayName: oaInfo.displayName,
+        oaInfo,
       };
     } catch (error) {
       throw new Error(
@@ -474,18 +478,206 @@ export class LineService {
     }
   }
 
+  async fetchLineOaInfo(
+    channelAccessToken: string,
+    channelSecret: string,
+    options?: { lineAccountId?: string },
+  ): Promise<LineOaInfo> {
+    const client = new line.Client({
+      channelAccessToken,
+      channelSecret,
+    });
+
+    const botInfo = await client.getBotInfo();
+    const [followers, quota] = await Promise.all([
+      this.fetchFollowerInsight(client, options?.lineAccountId),
+      this.fetchMessageQuota(client),
+    ]);
+
+    const syncedAt = new Date();
+
+    return {
+      botUserId: botInfo.userId,
+      basicId: botInfo.basicId,
+      premiumId: botInfo.premiumId ?? null,
+      displayName: botInfo.displayName,
+      pictureUrl: botInfo.pictureUrl ?? null,
+      chatMode: botInfo.chatMode ?? null,
+      markAsReadMode: botInfo.markAsReadMode ?? null,
+      followerCount: followers.followerCount,
+      targetedReaches: followers.targetedReaches,
+      blockCount: followers.blockCount,
+      quotaType: quota.quotaType,
+      quotaLimit: quota.quotaLimit,
+      quotaUsed: quota.quotaUsed,
+      infoSyncedAt: syncedAt.toISOString(),
+    };
+  }
+
+  private async fetchFollowerInsight(
+    client: line.Client,
+    lineAccountId?: string,
+  ) {
+    let followerCount: number | null = null;
+    let targetedReaches: number | null = null;
+    let blockCount: number | null = null;
+
+    for (const daysAgo of [1, 2, 3]) {
+      try {
+        const insight = await client.getNumberOfFollowers(
+          this.tokyoDateString(daysAgo),
+        );
+
+        if (insight.status === 'ready' && 'followers' in insight) {
+          followerCount =
+            insight.followers != null ? Number(insight.followers) : null;
+          targetedReaches =
+            insight.targetedReaches != null
+              ? Number(insight.targetedReaches)
+              : null;
+          blockCount =
+            insight.blocks != null ? Number(insight.blocks) : null;
+          break;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `LINE follower insight unavailable: ${error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        break;
+      }
+    }
+
+    if (followerCount == null && lineAccountId) {
+      followerCount = await this.prisma.lineUser.count({
+        where: { lineAccountId, status: 'following' },
+      });
+    }
+
+    return { followerCount, targetedReaches, blockCount };
+  }
+
+  private async fetchMessageQuota(client: line.Client) {
+    try {
+      const [limit, usage] = await Promise.all([
+        client.getTargetLimitForAdditionalMessages(),
+        client.getNumberOfMessagesSentThisMonth(),
+      ]);
+
+      return {
+        quotaType: limit.type ?? null,
+        quotaLimit: limit.value ?? null,
+        quotaUsed: usage.totalUsage ?? null,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `LINE quota unavailable: ${error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      return {
+        quotaType: null,
+        quotaLimit: null,
+        quotaUsed: null,
+      };
+    }
+  }
+
+  private tokyoDateString(daysAgo: number): string {
+    const tokyo = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    tokyo.setUTCDate(tokyo.getUTCDate() - daysAgo);
+    const year = tokyo.getUTCFullYear();
+    const month = String(tokyo.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(tokyo.getUTCDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+  }
+
+  toOaInfoFields(oaInfo: LineOaInfo): LineOaInfoFields {
+    return {
+      ...oaInfo,
+      infoSyncedAt: new Date(oaInfo.infoSyncedAt),
+    };
+  }
+
+  mapStoredOaInfo(account: StoredLineOaInfo): LineOaInfo | null {
+    if (!account.botUserId && !account.displayName) {
+      return null;
+    }
+
+    return {
+      botUserId: account.botUserId ?? '',
+      basicId: account.basicId ?? '',
+      premiumId: account.premiumId ?? null,
+      displayName: account.displayName ?? '',
+      pictureUrl: account.pictureUrl ?? null,
+      chatMode: account.chatMode ?? null,
+      markAsReadMode: account.markAsReadMode ?? null,
+      followerCount: account.followerCount ?? null,
+      targetedReaches: account.targetedReaches ?? null,
+      blockCount: account.blockCount ?? null,
+      quotaType: account.quotaType ?? null,
+      quotaLimit: account.quotaLimit ?? null,
+      quotaUsed: account.quotaUsed ?? null,
+      infoSyncedAt: (account.infoSyncedAt ?? new Date()).toISOString(),
+    };
+  }
+
   async saveLineAccount(
     userId: string,
     channelAccessToken: string,
     channelSecret: string,
     name: string,
+    oaInfo?: LineOaInfo,
   ) {
     return await this.lineAccountRepository.saveLineAccount({
       userId,
       name,
       channelAccessToken,
       channelSecret,
+      oaInfo: oaInfo ? this.toOaInfoFields(oaInfo) : undefined,
     });
+  }
+
+  async getLineAccountForUser(userId: string) {
+    const account =
+      await this.lineAccountRepository.getLineAccountByUserId(userId);
+
+    if (!account) {
+      return { connected: false as const };
+    }
+
+    return {
+      connected: true as const,
+      id: account.id,
+      name: account.name,
+      channelAccessToken: account.channelAccessToken,
+      channelSecret: account.channelSecret,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      oaInfo: this.mapStoredOaInfo(account),
+    };
+  }
+
+  async testSavedConnection(userId: string) {
+    const account =
+      await this.lineAccountRepository.getLineAccountByUserId(userId);
+
+    if (!account) {
+      throw new NotFoundException('LINE account not found');
+    }
+
+    const result = await this.verifyConnection(
+      account.channelAccessToken,
+      account.channelSecret,
+      { lineAccountId: account.id },
+    );
+
+    await this.lineAccountRepository.updateOaInfo(
+      account.id,
+      this.toOaInfoFields(result.oaInfo),
+    );
+
+    return result;
   }
 
   async findLineUsers(userId: string, query: QueryLineUsersDto) {
