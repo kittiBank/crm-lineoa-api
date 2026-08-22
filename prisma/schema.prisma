@@ -45,6 +45,21 @@ model LineAccount {
   channelSecret      String
   channelAccessToken String
 
+  botUserId       String?
+  basicId         String?
+  premiumId       String?
+  displayName     String?
+  pictureUrl      String?
+  chatMode        String?
+  markAsReadMode  String?
+  followerCount   Int?
+  targetedReaches Int?
+  blockCount      Int?
+  quotaType       String?
+  quotaLimit      Int?
+  quotaUsed       Int?
+  infoSyncedAt    DateTime?
+
   // Relations
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   lineUsers LineUser[]

@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { LineOaInfoFields } from '../types/line-oa-info';
 
 export interface CreateLineAccountInput {
   userId: string;
   name: string;
   channelAccessToken: string;
   channelSecret: string;
+  oaInfo?: LineOaInfoFields;
 }
 
 export interface LineAccountResponse {
@@ -16,25 +18,26 @@ export interface LineAccountResponse {
 
 @Injectable()
 export class LineAccountRepository {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   /**
    * Save LINE Account credentials to database
    * Deletes existing account if any (only one per user)
    */
-  async saveLineAccount(input: CreateLineAccountInput): Promise<LineAccountResponse> {
-    // Delete existing account if any (only one per user)
+  async saveLineAccount(
+    input: CreateLineAccountInput,
+  ): Promise<LineAccountResponse> {
     await this.prisma.lineAccount.deleteMany({
       where: { userId: input.userId },
     });
 
-    // Create new LINE account
     const lineAccount = await this.prisma.lineAccount.create({
       data: {
         userId: input.userId,
         name: input.name,
         channelAccessToken: input.channelAccessToken,
         channelSecret: input.channelSecret,
+        ...(input.oaInfo ?? {}),
       },
     });
 
@@ -45,27 +48,28 @@ export class LineAccountRepository {
     };
   }
 
-  /**
-   * Get LINE Account by user ID
-   */
+  async updateOaInfo(accountId: string, oaInfo: LineOaInfoFields) {
+    return this.prisma.lineAccount.update({
+      where: { id: accountId },
+      data: {
+        ...oaInfo,
+        name: oaInfo.displayName || undefined,
+      },
+    });
+  }
+
   async getLineAccountByUserId(userId: string) {
     return await this.prisma.lineAccount.findUnique({
       where: { userId },
     });
   }
 
-  /**
-   * Get LINE Account by ID
-   */
   async getLineAccountById(id: string) {
     return await this.prisma.lineAccount.findUnique({
       where: { id },
     });
   }
 
-  /**
-   * Delete LINE Account
-   */
   async deleteLineAccount(id: string) {
     return await this.prisma.lineAccount.delete({
       where: { id },
