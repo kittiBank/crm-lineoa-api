@@ -10,6 +10,7 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
+    "dev": "nest start --watch",
     "start:dev": "nest start --watch",
     "start:worker": "nest start --entryFile worker/main --watch",
     "start:worker:prod": "node dist/worker/main",
@@ -69,7 +70,8 @@
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "uuid": "^9.0.1",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "winston-transport": "^4.9.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
