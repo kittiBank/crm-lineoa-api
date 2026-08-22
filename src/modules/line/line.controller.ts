@@ -5,6 +5,8 @@ import {
   Body,
   BadRequestException,
   HttpException,
+  HttpCode,
+  HttpStatus,
   UseGuards,
   Request,
   Req,
@@ -16,7 +18,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { LineService } from './line.service';
 import { ConfigService } from '@nestjs/config';
-import { VerifyLineDto } from './dto/verify-line.dto';
+import { UpsertLineAccountDto, VerifyLineDto } from './dto/verify-line.dto';
 import { QueryLineUsersDto } from './dto/query-line-users.dto';
 import * as line from '@line/bot-sdk';
 import { validateSignature } from '@line/bot-sdk';
@@ -99,22 +101,57 @@ export class LineController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Get the current user LINE Official Account and saved OA info',
+    summary:
+      'Get the current user LINE Official Account (DB only, no live LINE calls)',
   })
   @ApiResponse({
     status: 200,
-    description: 'LINE account if connected, otherwise connected=false',
+    description:
+      'Lean settings payload: connected flag, masked credentials, saved OA info',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getLineAccount(@Request() req: { user: { id: string } }) {
     return this.lineService.getLineAccountForUser(req.user.id);
   }
 
+  @Post('account')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Test or save LINE Official Account credentials',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lean settings payload after test or save',
+  })
+  @ApiResponse({ status: 400, description: 'Failed to verify connection' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async upsertAccount(
+    @Request() req: { user: { id: string } },
+    @Body() dto: UpsertLineAccountDto,
+  ) {
+    try {
+      return await this.lineService.upsertLineAccount(req.user.id, dto);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new BadRequestException(
+        error instanceof Error
+          ? error.message
+          : 'Failed to verify LINE connection',
+      );
+    }
+  }
+
   @Post('account/test')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Test connection using the saved LINE account credentials',
+    summary: 'Deprecated: use POST /line/account with action=test',
+    deprecated: true,
   })
   @ApiResponse({
     status: 200,
@@ -122,19 +159,11 @@ export class LineController {
   })
   @ApiResponse({ status: 400, description: 'Failed to verify connection' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'LINE account not found' })
   async testSavedConnection(@Request() req: { user: { id: string } }) {
     try {
-      const verifyResult = await this.lineService.testSavedConnection(
-        req.user.id,
-      );
-
-      return {
-        status: 'verified',
-        botUserId: verifyResult.botUserId,
-        botDisplayName: verifyResult.botDisplayName,
-        oaInfo: verifyResult.oaInfo,
-      };
+      return await this.lineService.upsertLineAccount(req.user.id, {
+        action: 'test',
+      });
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -151,23 +180,13 @@ export class LineController {
   @Post('verify')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Verify LINE Bot connection with provided credentials' })
+  @ApiOperation({
+    summary: 'Deprecated: use POST /line/account with action=test|save',
+    deprecated: true,
+  })
   @ApiResponse({
     status: 200,
     description: 'LINE Bot connection verified successfully (and saved to DB if requested)',
-    schema: {
-      example: {
-        status: 'verified',
-        botUserId: 'U1234567890abcdef1234567890abcdef',
-        botDisplayName: 'My LINE Bot',
-        saved: true,
-        account: {
-          id: 'account-id',
-          name: 'My LINE Bot',
-          createdAt: '2024-07-16T10:00:00Z',
-        },
-      },
-    },
   })
   @ApiResponse({
     status: 400,
@@ -178,46 +197,25 @@ export class LineController {
     description: 'Unauthorized - JWT token required',
   })
   async verifyConnection(
-    @Request() req: any,
+    @Request() req: { user: { id: string } },
     @Body() verifyLineDto: VerifyLineDto,
-  ): Promise<any> {
+  ) {
     try {
-      // Verify connection
-      const verifyResult = await this.lineService.verifyConnection(
-        verifyLineDto.channelAccessToken,
-        verifyLineDto.channelSecret,
-      );
-
-      const shouldSave = verifyLineDto.saveToDb === true;
-      let savedAccount: any = null;
-
-      if (shouldSave) {
-        const userId = req.user?.id;
-        if (!userId) {
-          throw new BadRequestException('User ID not found in JWT context');
-        }
-
-        const accountName = verifyLineDto.name || verifyResult.botDisplayName || 'LINE Bot';
-        savedAccount = await this.lineService.saveLineAccount(
-          userId,
-          verifyLineDto.channelAccessToken,
-          verifyLineDto.channelSecret,
-          accountName,
-          verifyResult.oaInfo,
-        );
+      return await this.lineService.upsertLineAccount(req.user.id, {
+        action: verifyLineDto.saveToDb ? 'save' : 'test',
+        channelAccessToken: verifyLineDto.channelAccessToken,
+        channelSecret: verifyLineDto.channelSecret,
+        name: verifyLineDto.name,
+      });
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
       }
 
-      return {
-        status: 'verified',
-        botUserId: verifyResult.botUserId,
-        botDisplayName: verifyResult.botDisplayName,
-        oaInfo: verifyResult.oaInfo,
-        saved: shouldSave,
-        ...(shouldSave && { account: savedAccount }),
-      };
-    } catch (error) {
       throw new BadRequestException(
-        error instanceof Error ? error.message : 'Failed to verify LINE connection',
+        error instanceof Error
+          ? error.message
+          : 'Failed to verify LINE connection',
       );
     }
   }
