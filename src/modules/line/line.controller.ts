@@ -123,7 +123,7 @@ export class LineController {
   @ApiResponse({
     status: 200,
     description:
-      '{ success: true, data: [{ quota, used, remaining, ... }] }. Cached 5 minutes in line_accounts.',
+      '{ success: true, data: [{ quota, used, remaining, ... }] }. Cached 5 minutes unless a broadcast was sent after the last sync.',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getMessageQuota(@Request() req: { user: { id: string } }) {
