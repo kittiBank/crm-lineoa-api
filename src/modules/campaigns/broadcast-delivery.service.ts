@@ -176,13 +176,28 @@ export class BroadcastDeliveryService {
     const status =
       successCount === 0 && failureCount > 0 ? 'failed' : 'completed';
 
-    return this.finalizeBroadcast(broadcastId, {
+    const finalizedBroadcast = await this.finalizeBroadcast(broadcastId, {
       messageCount,
       successCount,
       failureCount,
       status,
       logs,
     });
+
+    if (successCount > 0) {
+      try {
+        await this.lineService.refreshMessageQuotaAfterBroadcast(
+          userId,
+          successCount * lineMessages.length,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to refresh message quota after broadcast ${broadcastId}: ${this.getErrorMessage(error)}`,
+        );
+      }
+    }
+
+    return finalizedBroadcast;
   }
 
   private async getRecipients(lineAccountId: string, audienceType: string) {

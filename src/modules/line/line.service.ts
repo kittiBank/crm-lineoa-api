@@ -666,22 +666,102 @@ export class LineService {
   }
 
   async getMessageQuotaForUser(userId: string) {
-    const existing = this.messageQuotaInflight.get(userId);
-    if (existing) {
-      return existing;
+    return this.runMessageQuotaLoad(userId, {});
+  }
+
+  async refreshMessageQuotaAfterBroadcast(
+    userId: string,
+    extraUsed: number,
+  ) {
+    return this.runMessageQuotaLoad(userId, {
+      force: true,
+      extraUsed: Math.max(0, extraUsed),
+    });
+  }
+
+  private runMessageQuotaLoad(
+    userId: string,
+    options: { force?: boolean; extraUsed?: number },
+  ) {
+    const skipInflight =
+      options.force === true || (options.extraUsed ?? 0) > 0;
+
+    if (!skipInflight) {
+      const existing = this.messageQuotaInflight.get(userId);
+      if (existing) {
+        return existing;
+      }
     }
 
-    const request = this.loadMessageQuotaForUser(userId).finally(() => {
-      if (this.messageQuotaInflight.get(userId) === request) {
-        this.messageQuotaInflight.delete(userId);
-      }
-    });
+    const request = this.loadMessageQuotaForUser(userId, options).finally(
+      () => {
+        if (this.messageQuotaInflight.get(userId) === request) {
+          this.messageQuotaInflight.delete(userId);
+        }
+      },
+    );
 
-    this.messageQuotaInflight.set(userId, request);
+    if (!skipInflight) {
+      this.messageQuotaInflight.set(userId, request);
+    }
+
     return request;
   }
 
-  private async loadMessageQuotaForUser(userId: string) {
+  private async getBroadcastUsageSince(userId: string, since: Date) {
+    const where = {
+      userId,
+      successCount: { gt: 0 },
+      sentAt: { gt: since },
+    };
+
+    const [latest, aggregate] = await Promise.all([
+      this.prisma.broadcast.findFirst({
+        where,
+        orderBy: { sentAt: 'desc' },
+        select: { id: true },
+      }),
+      this.prisma.broadcast.aggregate({
+        where,
+        _sum: { successCount: true },
+      }),
+    ]);
+
+    return {
+      hasNewer: latest != null,
+      extraUsed: aggregate._sum.successCount ?? 0,
+    };
+  }
+
+  private mergeQuotaUsage(
+    quota: {
+      quotaType: string | null;
+      quotaLimit: number | null;
+      quotaUsed: number | null;
+      quotaRemaining: number | null;
+    },
+    storedUsed: number,
+    extraUsed: number,
+  ) {
+    const used =
+      extraUsed > 0
+        ? Math.max(quota.quotaUsed ?? 0, storedUsed + extraUsed)
+        : (quota.quotaUsed ?? 0);
+    const remaining =
+      quota.quotaLimit != null ? Math.max(0, quota.quotaLimit - used) : null;
+
+    return {
+      quotaType: quota.quotaType,
+      quotaLimit: quota.quotaLimit,
+      quotaUsed: used,
+      quotaRemaining: remaining,
+    };
+  }
+
+  private async loadMessageQuotaForUser(
+    userId: string,
+    options: { force?: boolean; extraUsed?: number } = {},
+  ) {
     const account = (await this.lineAccountRepository.getLineAccountByUserId(
       userId,
     )) as
@@ -722,14 +802,30 @@ export class LineService {
     const storedQuota = quotaRows[0];
     const accountWithQuota = {
       ...account,
+      quotaType: storedQuota?.quotaType ?? account.quotaType,
+      quotaLimit: storedQuota?.quotaLimit ?? account.quotaLimit,
+      quotaUsed: storedQuota?.quotaUsed ?? account.quotaUsed,
       quotaRemaining: storedQuota?.quotaRemaining ?? null,
       quotaSyncedAt: storedQuota?.quotaSyncedAt ?? null,
     };
 
+    const extraFromOption = Math.max(0, options.extraUsed ?? 0);
+    const usageSince = accountWithQuota.quotaSyncedAt
+      ? await this.getBroadcastUsageSince(
+          userId,
+          new Date(accountWithQuota.quotaSyncedAt),
+        )
+      : { hasNewer: false, extraUsed: 0 };
+    const extraUsed =
+      extraFromOption > 0 ? extraFromOption : usageSince.extraUsed;
+
     const cacheFresh =
+      options.force !== true &&
+      extraFromOption === 0 &&
+      !usageSince.hasNewer &&
       accountWithQuota.quotaSyncedAt != null &&
       Date.now() - new Date(accountWithQuota.quotaSyncedAt).getTime() <
-      LineService.MESSAGE_QUOTA_CACHE_MS &&
+        LineService.MESSAGE_QUOTA_CACHE_MS &&
       (accountWithQuota.quotaType != null ||
         accountWithQuota.quotaLimit != null ||
         accountWithQuota.quotaUsed != null);
@@ -742,6 +838,8 @@ export class LineService {
         ],
       };
     }
+
+    const storedUsed = accountWithQuota.quotaUsed ?? 0;
 
     try {
       const client = new line.Client({
@@ -759,17 +857,15 @@ export class LineService {
         throw new Error('LINE did not return quota data');
       }
 
-      await this.lineAccountRepository.updateMessageQuota(account.id, quota);
+      const merged = this.mergeQuotaUsage(quota, storedUsed, extraUsed);
+      await this.lineAccountRepository.updateMessageQuota(account.id, merged);
 
       return {
         success: true as const,
         data: [
           this.toMessageQuotaPayload(
             {
-              quotaType: quota.quotaType,
-              quotaLimit: quota.quotaLimit,
-              quotaUsed: quota.quotaUsed,
-              quotaRemaining: quota.quotaRemaining,
+              ...merged,
               quotaSyncedAt: new Date(),
             },
             { cached: false },
@@ -778,28 +874,50 @@ export class LineService {
       };
     } catch (error) {
       this.logger.warn(
-        `Failed to refresh LINE message quota: ${error instanceof Error ? error.message : String(error)
+        `Failed to refresh LINE message quota: ${
+          error instanceof Error ? error.message : String(error)
         }`,
       );
 
       if (
-        account.quotaType != null ||
-        account.quotaLimit != null ||
-        account.quotaUsed != null
+        extraUsed > 0 &&
+        (accountWithQuota.quotaLimit != null || storedUsed > 0)
       ) {
+        const merged = this.mergeQuotaUsage(
+          {
+            quotaType: accountWithQuota.quotaType,
+            quotaLimit: accountWithQuota.quotaLimit,
+            quotaUsed: storedUsed,
+            quotaRemaining: accountWithQuota.quotaRemaining,
+          },
+          storedUsed,
+          extraUsed,
+        );
+        await this.lineAccountRepository.updateMessageQuota(account.id, merged);
+
         return {
           success: true as const,
           data: [
             this.toMessageQuotaPayload(
               {
-                quotaType: account.quotaType,
-                quotaLimit: account.quotaLimit,
-                quotaUsed: account.quotaUsed,
-                quotaRemaining: accountWithQuota.quotaRemaining,
-                quotaSyncedAt: accountWithQuota.quotaSyncedAt,
+                ...merged,
+                quotaSyncedAt: new Date(),
               },
-              { cached: true },
+              { cached: false },
             ),
+          ],
+        };
+      }
+
+      if (
+        accountWithQuota.quotaType != null ||
+        accountWithQuota.quotaLimit != null ||
+        accountWithQuota.quotaUsed != null
+      ) {
+        return {
+          success: true as const,
+          data: [
+            this.toMessageQuotaPayload(accountWithQuota, { cached: true }),
           ],
         };
       }
