@@ -102,16 +102,32 @@ export class LineController {
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      'Get the current user LINE Official Account (DB only, no live LINE calls)',
+      'Get the current user LINE Official Account (DB only, no live LINE calls)'
   })
   @ApiResponse({
     status: 200,
     description:
-      'Lean settings payload: connected flag, masked credentials, saved OA info',
+      'Lean settings payload: connected flag, masked credentials, saved OA info'
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getLineAccount(@Request() req: { user: { id: string } }) {
     return this.lineService.getLineAccountForUser(req.user.id);
+  }
+
+  @Get('message-quota')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get current LINE monthly message quota, used, and remaining',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      '{ success: true, data: [{ quota, used, remaining, ... }] }. Cached 5 minutes in line_accounts.',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMessageQuota(@Request() req: { user: { id: string } }) {
+    return this.lineService.getMessageQuotaForUser(req.user.id);
   }
 
   @Post('account')
@@ -147,6 +163,7 @@ export class LineController {
   }
 
   @Post('account/test')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
@@ -178,6 +195,7 @@ export class LineController {
   }
 
   @Post('verify')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({

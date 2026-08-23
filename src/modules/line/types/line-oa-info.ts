@@ -40,5 +40,7 @@ export type StoredLineOaInfo = {
   quotaType?: string | null;
   quotaLimit?: number | null;
   quotaUsed?: number | null;
+  quotaRemaining?: number | null;
+  quotaSyncedAt?: Date | null;
   infoSyncedAt?: Date | null;
 };
