@@ -20,9 +20,27 @@ fi
 
 echo "==> Deploying ${IMAGE_TAG} to $(hostname)"
 echo "==> App directory: ${APP_DIR}"
+export IMAGE_TAG
 
-echo "==> Building api + worker images..."
-docker compose -f "$COMPOSE_FILE" build api worker
+echo "==> Disk before cleanup:"
+df -h / || true
+docker system df || true
+
+# Stop api/worker so their old images can be pruned (brief downtime).
+# Leaving them running is what filled the disk on the last ENOSPC build.
+echo "==> Stopping api + worker to reclaim image layers..."
+docker compose -f "$COMPOSE_FILE" stop api worker >/dev/null 2>&1 || true
+
+echo "==> Freeing unused Docker data..."
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -af >/dev/null 2>&1 || true
+docker builder prune -af >/dev/null 2>&1 || true
+
+echo "==> Disk after cleanup:"
+df -h / || true
+
+echo "==> Building image (shared by api + worker)..."
+docker compose -f "$COMPOSE_FILE" build api
 
 echo "==> Starting stack..."
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans

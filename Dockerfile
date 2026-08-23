@@ -3,21 +3,29 @@
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-RUN apk add --no-cache libc6-compat openssl python3 make g++
-
 WORKDIR /app
+
+# Download only the Alpine/OpenSSL 3 engine — extra binaries blow disk on small EC2 hosts.
+ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
-RUN npx prisma generate
+# Compile native addons (bcrypt), then drop the toolchain so nest build has room.
+RUN apk add --no-cache libc6-compat openssl python3 make g++ \
+  && npm ci \
+  && npx prisma generate \
+  && apk del python3 make g++ \
+  && npm cache clean --force
 
 COPY . .
 
+# prisma stays after prune (production dependency for migrate deploy).
+# Re-installing it here previously filled the disk (ENOSPC) and failed the build.
 RUN npm run build \
   && npm prune --omit=dev \
-  && npm install prisma@5.7.1 --no-save --omit=dev --no-fund --no-audit
+  && npm cache clean --force \
+  && rm -rf /tmp/* /root/.npm
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner

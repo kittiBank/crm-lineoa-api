@@ -8,6 +8,7 @@
 
 services:
   api:
+    image: crm-lineoa-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -41,9 +42,7 @@ services:
       start_period: 40s
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: crm-lineoa-api:${IMAGE_TAG:-latest}
     container_name: crm_lineoa_worker
     restart: unless-stopped
     command: ['node', 'dist/worker/main.js']
