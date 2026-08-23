@@ -41,6 +41,20 @@ export class LineAccountRepository {
       },
     });
 
+    if (input.oaInfo) {
+      const quotaRemaining =
+        input.oaInfo.quotaLimit != null && input.oaInfo.quotaUsed != null
+          ? Math.max(0, input.oaInfo.quotaLimit - input.oaInfo.quotaUsed)
+          : null;
+
+      await this.updateMessageQuota(lineAccount.id, {
+        quotaType: input.oaInfo.quotaType,
+        quotaLimit: input.oaInfo.quotaLimit,
+        quotaUsed: input.oaInfo.quotaUsed,
+        quotaRemaining,
+      });
+    }
+
     return {
       id: lineAccount.id,
       name: lineAccount.name,
@@ -49,12 +63,52 @@ export class LineAccountRepository {
   }
 
   async updateOaInfo(accountId: string, oaInfo: LineOaInfoFields) {
-    return this.prisma.lineAccount.update({
+    const updated = await this.prisma.lineAccount.update({
       where: { id: accountId },
       data: {
         ...oaInfo,
         name: oaInfo.displayName || undefined,
       },
+    });
+
+    const quotaRemaining =
+      oaInfo.quotaLimit != null && oaInfo.quotaUsed != null
+        ? Math.max(0, oaInfo.quotaLimit - oaInfo.quotaUsed)
+        : null;
+
+    await this.updateMessageQuota(accountId, {
+      quotaType: oaInfo.quotaType,
+      quotaLimit: oaInfo.quotaLimit,
+      quotaUsed: oaInfo.quotaUsed,
+      quotaRemaining,
+    });
+
+    return updated;
+  }
+
+  async updateMessageQuota(
+    accountId: string,
+    data: {
+      quotaType: string | null;
+      quotaLimit: number | null;
+      quotaUsed: number | null;
+      quotaRemaining: number | null;
+    },
+  ) {
+    await this.prisma.$executeRaw`
+      UPDATE "line_accounts"
+      SET
+        "quotaType" = ${data.quotaType},
+        "quotaLimit" = ${data.quotaLimit},
+        "quotaUsed" = ${data.quotaUsed},
+        "quotaRemaining" = ${data.quotaRemaining},
+        "quotaSyncedAt" = NOW(),
+        "updatedAt" = NOW()
+      WHERE id = ${accountId}
+    `;
+
+    return this.prisma.lineAccount.findUnique({
+      where: { id: accountId },
     });
   }
 
