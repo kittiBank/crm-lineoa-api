@@ -12,8 +12,25 @@ import { LineOaInfo, LineOaInfoFields, StoredLineOaInfo } from './types/line-oa-
 
 @Injectable()
 export class LineService {
+  private static readonly MESSAGE_QUOTA_CACHE_MS = 5 * 60 * 1000;
   private lineClient: line.Client;
   private logger = new Logger('LineService');
+  private messageQuotaInflight = new Map<
+    string,
+    Promise<{
+      success: boolean;
+      data: Array<{
+        quota: number | null;
+        used: number;
+        remaining: number | null;
+        quotaType: string | null;
+        resetLabel: string;
+        syncedAt: string;
+        cached: boolean;
+      }>;
+      message?: string;
+    }>
+  >();
 
   constructor(
     private configService: ConfigService,
@@ -565,10 +582,19 @@ export class LineService {
         client.getNumberOfMessagesSentThisMonth(),
       ]);
 
+      const quotaType = limit.type ?? null;
+      const quotaLimit = limit.value ?? null;
+      const quotaUsed = usage.totalUsage ?? null;
+      const quotaRemaining =
+        quotaLimit != null && quotaUsed != null
+          ? Math.max(0, quotaLimit - quotaUsed)
+          : null;
+
       return {
-        quotaType: limit.type ?? null,
-        quotaLimit: limit.value ?? null,
-        quotaUsed: usage.totalUsage ?? null,
+        quotaType,
+        quotaLimit,
+        quotaUsed,
+        quotaRemaining,
       };
     } catch (error) {
       this.logger.warn(
@@ -580,6 +606,211 @@ export class LineService {
         quotaType: null,
         quotaLimit: null,
         quotaUsed: null,
+        quotaRemaining: null,
+      };
+    }
+  }
+
+  private nextQuotaResetLabel() {
+    const tokyo = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const nextMonthIndex =
+      tokyo.getUTCMonth() === 11 ? 0 : tokyo.getUTCMonth() + 1;
+    const year =
+      tokyo.getUTCMonth() === 11
+        ? tokyo.getUTCFullYear() + 1
+        : tokyo.getUTCFullYear();
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    return `Resets on 1 ${monthNames[nextMonthIndex]} ${year}`;
+  }
+
+  private toMessageQuotaPayload(
+    account: {
+      quotaType: string | null;
+      quotaLimit: number | null;
+      quotaUsed: number | null;
+      quotaRemaining: number | null;
+      quotaSyncedAt: Date | null;
+    },
+    options: { cached: boolean },
+  ) {
+    const used = account.quotaUsed ?? 0;
+    const remaining =
+      account.quotaRemaining ??
+      (account.quotaLimit != null
+        ? Math.max(0, account.quotaLimit - used)
+        : null);
+
+    return {
+      quota: account.quotaLimit,
+      used,
+      remaining,
+      quotaType: account.quotaType,
+      resetLabel: this.nextQuotaResetLabel(),
+      syncedAt: (account.quotaSyncedAt ?? new Date()).toISOString(),
+      cached: options.cached,
+    };
+  }
+
+  async getMessageQuotaForUser(userId: string) {
+    const existing = this.messageQuotaInflight.get(userId);
+    if (existing) {
+      return existing;
+    }
+
+    const request = this.loadMessageQuotaForUser(userId).finally(() => {
+      if (this.messageQuotaInflight.get(userId) === request) {
+        this.messageQuotaInflight.delete(userId);
+      }
+    });
+
+    this.messageQuotaInflight.set(userId, request);
+    return request;
+  }
+
+  private async loadMessageQuotaForUser(userId: string) {
+    const account = (await this.lineAccountRepository.getLineAccountByUserId(
+      userId,
+    )) as
+      | (NonNullable<
+        Awaited<ReturnType<LineAccountRepository['getLineAccountByUserId']>>
+      > & {
+        quotaRemaining: number | null;
+        quotaSyncedAt: Date | null;
+      })
+      | null;
+
+    if (!account) {
+      return {
+        success: false as const,
+        data: [],
+        message: 'LINE account is not connected',
+      };
+    }
+
+    const quotaRows = await this.prisma.$queryRaw<
+      Array<{
+        quotaType: string | null;
+        quotaLimit: number | null;
+        quotaUsed: number | null;
+        quotaRemaining: number | null;
+        quotaSyncedAt: Date | null;
+      }>
+    >`
+      SELECT
+        "quotaType",
+        "quotaLimit",
+        "quotaUsed",
+        "quotaRemaining",
+        "quotaSyncedAt"
+      FROM "line_accounts"
+      WHERE id = ${account.id}
+    `;
+    const storedQuota = quotaRows[0];
+    const accountWithQuota = {
+      ...account,
+      quotaRemaining: storedQuota?.quotaRemaining ?? null,
+      quotaSyncedAt: storedQuota?.quotaSyncedAt ?? null,
+    };
+
+    const cacheFresh =
+      accountWithQuota.quotaSyncedAt != null &&
+      Date.now() - new Date(accountWithQuota.quotaSyncedAt).getTime() <
+      LineService.MESSAGE_QUOTA_CACHE_MS &&
+      (accountWithQuota.quotaType != null ||
+        accountWithQuota.quotaLimit != null ||
+        accountWithQuota.quotaUsed != null);
+
+    if (cacheFresh) {
+      return {
+        success: true as const,
+        data: [
+          this.toMessageQuotaPayload(accountWithQuota, { cached: true }),
+        ],
+      };
+    }
+
+    try {
+      const client = new line.Client({
+        channelAccessToken: account.channelAccessToken,
+        channelSecret: account.channelSecret,
+      });
+
+      const quota = await this.fetchMessageQuota(client);
+
+      if (
+        quota.quotaType == null &&
+        quota.quotaLimit == null &&
+        quota.quotaUsed == null
+      ) {
+        throw new Error('LINE did not return quota data');
+      }
+
+      await this.lineAccountRepository.updateMessageQuota(account.id, quota);
+
+      return {
+        success: true as const,
+        data: [
+          this.toMessageQuotaPayload(
+            {
+              quotaType: quota.quotaType,
+              quotaLimit: quota.quotaLimit,
+              quotaUsed: quota.quotaUsed,
+              quotaRemaining: quota.quotaRemaining,
+              quotaSyncedAt: new Date(),
+            },
+            { cached: false },
+          ),
+        ],
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to refresh LINE message quota: ${error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      if (
+        account.quotaType != null ||
+        account.quotaLimit != null ||
+        account.quotaUsed != null
+      ) {
+        return {
+          success: true as const,
+          data: [
+            this.toMessageQuotaPayload(
+              {
+                quotaType: account.quotaType,
+                quotaLimit: account.quotaLimit,
+                quotaUsed: account.quotaUsed,
+                quotaRemaining: accountWithQuota.quotaRemaining,
+                quotaSyncedAt: accountWithQuota.quotaSyncedAt,
+              },
+              { cached: true },
+            ),
+          ],
+        };
+      }
+
+      return {
+        success: false as const,
+        data: [],
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Failed to fetch LINE message quota',
       };
     }
   }

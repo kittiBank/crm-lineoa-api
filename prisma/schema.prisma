@@ -58,6 +58,8 @@ model LineAccount {
   quotaType       String?
   quotaLimit      Int?
   quotaUsed       Int?
+  quotaRemaining  Int?
+  quotaSyncedAt   DateTime?
   infoSyncedAt    DateTime?
 
   // Relations
