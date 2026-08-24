@@ -5,18 +5,13 @@ import {
   IsArray,
   IsIn,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
 
-const MESSAGE_TYPES = [
-  'text',
-  'image',
-  'video',
-  'flex',
-  'carousel',
-] as const;
+const MESSAGE_TYPES = ['text', 'image', 'video', 'flex', 'carousel'] as const;
 
 export class CarouselColumnDto {
   @ApiProperty({ required: false })
@@ -105,6 +100,11 @@ export class MessageBlockDto {
   @IsOptional()
   @IsString()
   buttonUrl?: string;
+
+  @ApiProperty({ required: false, type: Object })
+  @IsOptional()
+  @IsObject()
+  contents?: Record<string, unknown>;
 
   @ApiProperty({ type: [CarouselColumnDto], required: false })
   @IsOptional()

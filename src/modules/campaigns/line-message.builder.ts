@@ -1,13 +1,7 @@
 import * as line from '@line/bot-sdk';
 import { MessageBlockDto } from '../templates/dto/message-block.dto';
 
-const MESSAGE_TYPES = new Set([
-  'text',
-  'image',
-  'video',
-  'flex',
-  'carousel',
-]);
+const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'flex', 'carousel']);
 
 export function parseTemplateMessageBlocks(
   messages: unknown,
@@ -90,8 +84,7 @@ function buildLineMessage(block: MessageBlockDto): line.Message | null {
       return {
         type: 'video',
         originalContentUrl: block.videoUrl.trim(),
-        previewImageUrl:
-          block.previewImageUrl?.trim() || block.videoUrl.trim(),
+        previewImageUrl: block.previewImageUrl?.trim() || block.videoUrl.trim(),
       };
 
     case 'flex':
@@ -106,6 +99,17 @@ function buildLineMessage(block: MessageBlockDto): line.Message | null {
 }
 
 function buildFlexMessage(block: MessageBlockDto): line.FlexMessage | null {
+  if (
+    block.contents &&
+    (block.contents.type === 'bubble' || block.contents.type === 'carousel')
+  ) {
+    return {
+      type: 'flex',
+      altText: block.altText?.trim() || 'Flex message',
+      contents: block.contents as line.FlexMessage['contents'],
+    };
+  }
+
   const altText = block.altText?.trim() || block.title?.trim() || 'Message';
   const bodyContents: line.FlexComponent[] = [];
 
@@ -176,9 +180,7 @@ function buildFlexMessage(block: MessageBlockDto): line.FlexMessage | null {
   };
 }
 
-function buildCarouselMessage(
-  block: MessageBlockDto,
-): line.FlexMessage | null {
+function buildCarouselMessage(block: MessageBlockDto): line.FlexMessage | null {
   const columns = block.columns ?? [];
   if (columns.length === 0) {
     return null;
