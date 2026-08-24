@@ -10,14 +10,9 @@ import { StorageService } from '../storage/storage.service';
 import { CreateMessageTemplateDto } from './dto/create-message-template.dto';
 import { MessageBlockDto } from './dto/message-block.dto';
 import { UpdateMessageTemplateDto } from './dto/update-message-template.dto';
+import { validateFlexContents } from './flex-contents.validator';
 
-const MESSAGE_TYPES = new Set([
-  'text',
-  'image',
-  'video',
-  'flex',
-  'carousel',
-]);
+const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'flex', 'carousel']);
 
 const MAX_TEMPLATE_IMAGE_BYTES = 10 * 1024 * 1024;
 const TEMPLATE_MEDIA_DISPLAY_TTL_SECONDS = 60 * 60;
@@ -42,9 +37,7 @@ export class TemplatesService {
       },
     });
 
-    return Promise.all(
-      templates.map((template) => this.toResponse(template)),
-    );
+    return Promise.all(templates.map((template) => this.toResponse(template)));
   }
 
   async findOne(userId: string, id: string) {
@@ -65,6 +58,7 @@ export class TemplatesService {
   }
 
   async create(userId: string, dto: CreateMessageTemplateDto) {
+    this.assertValidFlexMessages(dto.messages);
     this.assertPersistedMediaUrls(dto.messages);
     const messages = this.canonicalizeMediaUrls(dto.messages);
     const messageType = this.resolveMessageType(messages);
@@ -155,6 +149,7 @@ export class TemplatesService {
 
     let messages: MessageBlockDto[] | undefined;
     if (dto.messages) {
+      this.assertValidFlexMessages(dto.messages);
       this.assertPersistedMediaUrls(dto.messages);
       messages = this.canonicalizeMediaUrls(dto.messages);
     }
@@ -249,22 +244,20 @@ export class TemplatesService {
     );
   }
 
-  private async toResponse(
-    template: {
-      id: string;
-      name: string;
-      description: string | null;
-      category: string;
-      messageType: string;
-      messages: Prisma.JsonValue;
-      content: string;
-      isActive: boolean;
-      usageCount: number;
-      createdAt: Date;
-      updatedAt: Date;
-      _count?: { broadcasts: number };
-    },
-  ) {
+  private async toResponse(template: {
+    id: string;
+    name: string;
+    description: string | null;
+    category: string;
+    messageType: string;
+    messages: Prisma.JsonValue;
+    content: string;
+    isActive: boolean;
+    usageCount: number;
+    createdAt: Date;
+    updatedAt: Date;
+    _count?: { broadcasts: number };
+  }) {
     const messages = await this.withAccessibleMediaUrls(
       this.parseMessages(template),
     );
@@ -283,7 +276,9 @@ export class TemplatesService {
     };
   }
 
-  private canonicalizeMediaUrls(messages: MessageBlockDto[]): MessageBlockDto[] {
+  private canonicalizeMediaUrls(
+    messages: MessageBlockDto[],
+  ): MessageBlockDto[] {
     return messages.map((message) => ({
       ...message,
       imageUrl: message.imageUrl
@@ -347,6 +342,32 @@ export class TemplatesService {
         }
       }
     }
+  }
+
+  private assertValidFlexMessages(messages: MessageBlockDto[]): void {
+    messages.forEach((message, index) => {
+      if (message.type !== 'flex') {
+        return;
+      }
+
+      const altText = message.altText?.trim();
+      if (!altText) {
+        throw new BadRequestException(
+          `Flex message ${index + 1}: Alt text is required`,
+        );
+      }
+
+      if (altText.length > 400) {
+        throw new BadRequestException(
+          `Flex message ${index + 1}: Alt text must be 400 characters or fewer`,
+        );
+      }
+
+      const error = validateFlexContents(message.contents);
+      if (error) {
+        throw new BadRequestException(`Flex message ${index + 1}: ${error}`);
+      }
+    });
   }
 
   private collectMediaUrls(message: MessageBlockDto): string[] {
