@@ -36,7 +36,7 @@ type Range = {
 
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async getOverview(userId: string, query: QueryDashboardDto) {
     const range = resolveDashboardRange(query);
@@ -65,32 +65,32 @@ export class DashboardService {
     ] = await Promise.all([
       lineAccount
         ? this.prisma.lineUser.count({
-            where: {
-              lineAccountId: lineAccount.id,
-              status: 'following',
-              OR: [
-                { followedAt: { gte: range.start, lt: range.end } },
-                {
-                  followedAt: null,
-                  createdAt: { gte: range.start, lt: range.end },
-                },
-              ],
-            },
-          })
+          where: {
+            lineAccountId: lineAccount.id,
+            status: 'following',
+            OR: [
+              { followedAt: { gte: range.start, lt: range.end } },
+              {
+                followedAt: null,
+                createdAt: { gte: range.start, lt: range.end },
+              },
+            ],
+          },
+        })
         : 0,
       lineAccount
         ? this.prisma.lineUser.count({
-            where: { lineAccountId: lineAccount.id, status: 'following' },
-          })
+          where: { lineAccountId: lineAccount.id, status: 'following' },
+        })
         : 0,
       lineAccount
         ? this.prisma.lineUser.count({
-            where: {
-              lineAccountId: lineAccount.id,
-              status: 'following',
-              lastActivity: { gte: range.start, lt: range.end },
-            },
-          })
+          where: {
+            lineAccountId: lineAccount.id,
+            status: 'following',
+            lastActivity: { gte: range.start, lt: range.end },
+          },
+        })
         : 0,
       this.prisma.broadcast.count({
         where: {
@@ -333,7 +333,7 @@ function startOfBangkokMonth(date: Date): Date {
   const bangkok = new Date(date.getTime() + BANGKOK_OFFSET_MS);
   return new Date(
     Date.UTC(bangkok.getUTCFullYear(), bangkok.getUTCMonth(), 1) -
-      BANGKOK_OFFSET_MS,
+    BANGKOK_OFFSET_MS,
   );
 }
 
