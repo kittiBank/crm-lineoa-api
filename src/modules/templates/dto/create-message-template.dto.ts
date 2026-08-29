@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -33,6 +34,7 @@ export class CreateMessageTemplateDto {
   })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(5)
   @ValidateNested({ each: true })
   @Type(() => MessageBlockDto)
   messages!: MessageBlockDto[];
