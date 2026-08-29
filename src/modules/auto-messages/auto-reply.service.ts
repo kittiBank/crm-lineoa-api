@@ -14,7 +14,7 @@ export class AutoReplyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly lineService: LineService,
-  ) {}
+  ) { }
 
   async processAutoReply(payload: AutoReplyQueueMessage): Promise<void> {
     const match = await this.findMatchingRule(
@@ -115,14 +115,18 @@ export class AutoReplyService {
           return false;
         }
 
-        const keyword = rule.keyword.trim();
-        if (rule.matchType === 'contains') {
-          return normalizedData
-            .toLowerCase()
-            .includes(keyword.toLowerCase());
-        }
+        const keywords = rule.keyword
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
 
-        return normalizedData === keyword;
+        return keywords.some((keyword) => {
+          if (rule.matchType === 'contains') {
+            return normalizedData.includes(keyword);
+          }
+
+          return normalizedData === keyword;
+        });
       }) ?? null
     );
   }

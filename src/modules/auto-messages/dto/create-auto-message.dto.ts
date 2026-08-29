@@ -16,8 +16,9 @@ export class CreateAutoMessageDto {
   name!: string;
 
   @ApiProperty({
-    example: 'action=promo',
-    description: 'Keyword matched against LINE postback data',
+    example: 'hello,promo',
+    description:
+      'Comma-separated keywords matched against LINE postback data (max 20)',
   })
   @IsString()
   @IsNotEmpty()

@@ -11,7 +11,7 @@ import { UpdateAutoMessageDto } from './dto/update-auto-message.dto';
 
 @Injectable()
 export class AutoMessagesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async findAll(userId: string) {
     const items = await this.prisma.autoMessage.findMany({
@@ -44,7 +44,7 @@ export class AutoMessagesService {
         data: {
           userId,
           name: dto.name,
-          keyword: dto.keyword.trim(),
+          keyword: this.normalizeKeywords(dto.keyword),
           matchType: dto.matchType ?? 'exact',
           templateId: dto.templateId,
           priority: dto.priority ?? 0,
@@ -72,7 +72,10 @@ export class AutoMessagesService {
         where: { id },
         data: {
           name: dto.name,
-          keyword: dto.keyword?.trim(),
+          keyword:
+            dto.keyword !== undefined
+              ? this.normalizeKeywords(dto.keyword)
+              : undefined,
           matchType: dto.matchType,
           templateId: dto.templateId,
           priority: dto.priority,
@@ -96,6 +99,31 @@ export class AutoMessagesService {
     });
 
     return { status: 'ok', id };
+  }
+
+  private normalizeKeywords(keyword: string): string {
+    const keywords: string[] = [];
+    const seen = new Set<string>();
+
+    for (const part of keyword.split(',')) {
+      const value = part.trim();
+      if (!value) continue;
+
+      if (seen.has(value)) continue;
+
+      seen.add(value);
+      keywords.push(value);
+    }
+
+    if (keywords.length === 0) {
+      throw new BadRequestException('At least one keyword is required');
+    }
+
+    if (keywords.length > 20) {
+      throw new BadRequestException('A maximum of 20 keywords is allowed');
+    }
+
+    return keywords.join(',');
   }
 
   private async ensureTemplateExists(userId: string, templateId: string) {
@@ -167,11 +195,11 @@ export class AutoMessagesService {
       updatedAt: item.updatedAt.toISOString(),
       template: item.template
         ? {
-            id: item.template.id,
-            name: item.template.name,
-            type: item.template.messageType,
-            isActive: item.template.isActive,
-          }
+          id: item.template.id,
+          name: item.template.name,
+          type: item.template.messageType,
+          isActive: item.template.isActive,
+        }
         : null,
     };
   }
