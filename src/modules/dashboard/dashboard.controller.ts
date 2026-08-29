@@ -27,6 +27,6 @@ export class DashboardController {
     @Request() req: { user: { id: string } },
     @Query() query: QueryDashboardDto,
   ) {
-    return this.dashboardService.getOverview(req.user.id, query.days ?? 7);
+    return this.dashboardService.getOverview(req.user.id, query);
   }
 }

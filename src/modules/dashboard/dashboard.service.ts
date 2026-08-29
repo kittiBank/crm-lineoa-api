@@ -1,9 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
-import { DashboardTrendDays } from './dto/query-dashboard.dto';
+import {
+  DashboardPeriod,
+  QueryDashboardDto,
+} from './dto/query-dashboard.dto';
 
 const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
-const ACTIVE_FOLLOWER_DAYS = 30;
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
 
 const STATUS_LABELS: Record<string, string> = {
   completed: 'Sent',
@@ -21,30 +26,58 @@ const STATUS_ORDER = [
   'failed',
 ] as const;
 
+type Range = {
+  period: DashboardPeriod;
+  start: Date;
+  end: Date;
+  granularity: 'hour' | 'day';
+  bucketCount: number;
+};
+
 @Injectable()
 export class DashboardService {
   constructor(private prisma: PrismaService) {}
 
-  async getOverview(userId: string, days: DashboardTrendDays = 7) {
+  async getOverview(userId: string, query: QueryDashboardDto) {
+    const range = resolveDashboardRange(query);
     const now = new Date();
-    const todayStart = startOfBangkokDay(now);
-    const trendStart = addDays(todayStart, -(days - 1));
-    const activeSince = addDays(now, -ACTIVE_FOLLOWER_DAYS);
 
     const lineAccount = await this.prisma.lineAccount.findUnique({
       where: { userId },
       select: { id: true },
     });
 
+    const broadcastInRange = this.broadcastOccurredInRange(
+      userId,
+      range.start,
+      range.end,
+    );
+
     const [
       totalAudience,
+      allFollowers,
       activeFollowers,
       activeBroadcasts,
-      messageSentToday,
+      messageSent,
       statusGroups,
       trendBroadcasts,
       recentBroadcasts,
     ] = await Promise.all([
+      lineAccount
+        ? this.prisma.lineUser.count({
+            where: {
+              lineAccountId: lineAccount.id,
+              status: 'following',
+              OR: [
+                { followedAt: { gte: range.start, lt: range.end } },
+                {
+                  followedAt: null,
+                  createdAt: { gte: range.start, lt: range.end },
+                },
+              ],
+            },
+          })
+        : 0,
       lineAccount
         ? this.prisma.lineUser.count({
             where: { lineAccountId: lineAccount.id, status: 'following' },
@@ -55,30 +88,33 @@ export class DashboardService {
             where: {
               lineAccountId: lineAccount.id,
               status: 'following',
-              lastActivity: { gte: activeSince },
+              lastActivity: { gte: range.start, lt: range.end },
             },
           })
         : 0,
       this.prisma.broadcast.count({
-        where: { userId, status: 'scheduled' },
+        where: {
+          ...broadcastInRange,
+          status: { in: ['scheduled', 'processing'] },
+        },
       }),
       this.prisma.broadcast.aggregate({
         where: {
           userId,
-          sentAt: { gte: todayStart },
+          sentAt: { gte: range.start, lt: range.end },
           status: { in: ['completed', 'processing'] },
         },
         _sum: { successCount: true },
       }),
       this.prisma.broadcast.groupBy({
         by: ['status'],
-        where: { userId },
+        where: broadcastInRange,
         _count: { _all: true },
       }),
       this.prisma.broadcast.findMany({
         where: {
           userId,
-          sentAt: { gte: trendStart },
+          sentAt: { gte: range.start, lt: range.end },
         },
         select: {
           sentAt: true,
@@ -87,7 +123,7 @@ export class DashboardService {
         },
       }),
       this.prisma.broadcast.findMany({
-        where: { userId },
+        where: broadcastInRange,
         orderBy: { createdAt: 'desc' },
         take: 5,
         select: {
@@ -109,16 +145,21 @@ export class DashboardService {
     );
 
     return {
+      period: range.period,
+      range: {
+        start: range.start.toISOString(),
+        end: now.toISOString(),
+      },
       metrics: {
         totalAudience,
         activeBroadcasts,
-        messageSentToday: messageSentToday._sum.successCount ?? 0,
+        messageSentToday: messageSent._sum.successCount ?? 0,
       },
       followers: {
         active: activeFollowers,
-        inactive: Math.max(totalAudience - activeFollowers, 0),
+        inactive: Math.max(allFollowers - activeFollowers, 0),
       },
-      broadcastTrend: this.buildTrend(trendBroadcasts, days, todayStart),
+      broadcastTrend: this.buildTrend(trendBroadcasts, range),
       broadcastStatus: STATUS_ORDER.map((status) => ({
         name: STATUS_LABELS[status],
         value: statusCountMap.get(status) ?? 0,
@@ -145,43 +186,124 @@ export class DashboardService {
     };
   }
 
+  private broadcastOccurredInRange(
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Prisma.BroadcastWhereInput {
+    return {
+      userId,
+      OR: [
+        { sentAt: { gte: start, lt: end } },
+        {
+          sentAt: null,
+          scheduledFor: { gte: start, lt: end },
+        },
+        {
+          sentAt: null,
+          scheduledFor: null,
+          createdAt: { gte: start, lt: end },
+        },
+      ],
+    };
+  }
+
   private buildTrend(
     broadcasts: {
       sentAt: Date | null;
       messageCount: number;
       successCount: number;
     }[],
-    days: DashboardTrendDays,
-    todayStart: Date,
+    range: Range,
   ) {
     const buckets = new Map<number, { sent: number; delivered: number }>();
+    const step =
+      range.granularity === 'hour' ? MS_PER_HOUR : MS_PER_DAY;
 
     for (const broadcast of broadcasts) {
       if (!broadcast.sentAt) {
         continue;
       }
 
-      const key = startOfBangkokDay(broadcast.sentAt).getTime();
+      const key =
+        range.granularity === 'hour'
+          ? startOfBangkokHour(broadcast.sentAt).getTime()
+          : startOfBangkokDay(broadcast.sentAt).getTime();
       const current = buckets.get(key) ?? { sent: 0, delivered: 0 };
       current.sent += broadcast.messageCount;
       current.delivered += broadcast.successCount;
       buckets.set(key, current);
     }
 
-    return Array.from({ length: days }, (_, index) => {
-      const dayStart = addDays(todayStart, -(days - 1 - index));
-      const totals = buckets.get(dayStart.getTime()) ?? {
+    return Array.from({ length: range.bucketCount }, (_, index) => {
+      const bucketStart = new Date(range.start.getTime() + index * step);
+      const totals = buckets.get(bucketStart.getTime()) ?? {
         sent: 0,
         delivered: 0,
       };
 
       return {
-        day: formatTrendLabel(dayStart, days),
+        day: formatTrendLabel(bucketStart, range),
         sent: totals.sent,
         delivered: totals.delivered,
       };
     });
   }
+}
+
+export function resolveDashboardRange(query: QueryDashboardDto): Range {
+  const period = resolvePeriod(query);
+  const now = new Date();
+  const todayStart = startOfBangkokDay(now);
+  const rangeEnd = addDays(todayStart, 1);
+
+  if (period === 'today') {
+    return {
+      period,
+      start: todayStart,
+      end: rangeEnd,
+      granularity: 'hour',
+      bucketCount: 24,
+    };
+  }
+
+  if (period === '7d') {
+    return {
+      period,
+      start: addDays(todayStart, -6),
+      end: rangeEnd,
+      granularity: 'day',
+      bucketCount: 7,
+    };
+  }
+
+  const monthStart = startOfBangkokMonth(now);
+  const bucketCount =
+    Math.round((todayStart.getTime() - monthStart.getTime()) / MS_PER_DAY) + 1;
+
+  return {
+    period,
+    start: monthStart,
+    end: rangeEnd,
+    granularity: 'day',
+    bucketCount,
+  };
+}
+
+function resolvePeriod(query: QueryDashboardDto): DashboardPeriod {
+  if (query.period) {
+    return query.period;
+  }
+
+  if (query.days === 7) {
+    return '7d';
+  }
+
+  if (query.days === 30 || query.days === 90) {
+    return 'month';
+  }
+
+  return 'today';
 }
 
 function startOfBangkokDay(date: Date): Date {
@@ -195,13 +317,44 @@ function startOfBangkokDay(date: Date): Date {
   );
 }
 
-function addDays(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+function startOfBangkokHour(date: Date): Date {
+  const bangkok = new Date(date.getTime() + BANGKOK_OFFSET_MS);
+  return new Date(
+    Date.UTC(
+      bangkok.getUTCFullYear(),
+      bangkok.getUTCMonth(),
+      bangkok.getUTCDate(),
+      bangkok.getUTCHours(),
+    ) - BANGKOK_OFFSET_MS,
+  );
 }
 
-function formatTrendLabel(dayStart: Date, days: DashboardTrendDays): string {
+function startOfBangkokMonth(date: Date): Date {
+  const bangkok = new Date(date.getTime() + BANGKOK_OFFSET_MS);
+  return new Date(
+    Date.UTC(bangkok.getUTCFullYear(), bangkok.getUTCMonth(), 1) -
+      BANGKOK_OFFSET_MS,
+  );
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * MS_PER_DAY);
+}
+
+function formatTrendLabel(bucketStart: Date, range: Range): string {
+  if (range.granularity === 'hour') {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Bangkok',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(bucketStart);
+  }
+
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Bangkok',
-    ...(days <= 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }),
-  }).format(dayStart);
+    ...(range.period === '7d'
+      ? { weekday: 'short' }
+      : { month: 'short', day: 'numeric' }),
+  }).format(bucketStart);
 }
