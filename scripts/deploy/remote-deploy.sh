@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs on EC2 after rsync + .env upload.
+# Runs on the GCP VM after rsync + .env upload.
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
