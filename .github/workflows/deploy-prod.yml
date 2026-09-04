@@ -100,8 +100,7 @@ jobs:
                  exit 1
                fi
              fi
-             command -v rsync
-             rsync --version | head -n 1"
+             echo \"rsync ready: \$(command -v rsync)\""
 
       - name: Sync application to GCP
         env:
