@@ -762,16 +762,9 @@ export class LineService {
     userId: string,
     options: { force?: boolean; extraUsed?: number } = {},
   ) {
-    const account = (await this.lineAccountRepository.getLineAccountByUserId(
+    const account = await this.lineAccountRepository.getLineAccountByUserId(
       userId,
-    )) as
-      | (NonNullable<
-        Awaited<ReturnType<LineAccountRepository['getLineAccountByUserId']>>
-      > & {
-        quotaRemaining: number | null;
-        quotaSyncedAt: Date | null;
-      })
-      | null;
+    );
 
     if (!account) {
       return {
@@ -802,9 +795,9 @@ export class LineService {
     const storedQuota = quotaRows[0];
     const accountWithQuota = {
       ...account,
-      quotaType: storedQuota?.quotaType ?? account.quotaType,
-      quotaLimit: storedQuota?.quotaLimit ?? account.quotaLimit,
-      quotaUsed: storedQuota?.quotaUsed ?? account.quotaUsed,
+      quotaType: storedQuota?.quotaType ?? null,
+      quotaLimit: storedQuota?.quotaLimit ?? null,
+      quotaUsed: storedQuota?.quotaUsed ?? null,
       quotaRemaining: storedQuota?.quotaRemaining ?? null,
       quotaSyncedAt: storedQuota?.quotaSyncedAt ?? null,
     };
