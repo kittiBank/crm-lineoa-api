@@ -84,7 +84,24 @@ jobs:
           APP_DIR="${GCP_APP_DIR:-/home/${GCP_USER}/crm-lineoa-api}"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${GCP_USER}@${GCP_HOST}" \
-            "mkdir -p '${APP_DIR}'"
+            "set -euo pipefail
+             mkdir -p '${APP_DIR}'
+             if ! command -v rsync >/dev/null 2>&1; then
+               echo 'Installing rsync on remote host...'
+               if command -v apt-get >/dev/null 2>&1; then
+                 sudo apt-get update -qq
+                 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync
+               elif command -v dnf >/dev/null 2>&1; then
+                 sudo dnf install -y rsync
+               elif command -v yum >/dev/null 2>&1; then
+                 sudo yum install -y rsync
+               else
+                 echo 'rsync is required on the remote host but no supported package manager was found' >&2
+                 exit 1
+               fi
+             fi
+             command -v rsync
+             rsync --version | head -n 1"
 
       - name: Sync application to GCP
         env:
