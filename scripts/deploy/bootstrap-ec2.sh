@@ -6,10 +6,10 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-$HOME/crm-lineoa-api}"
 
-echo "==> Installing Docker (Amazon Linux 2023 / Ubuntu)"
+echo "==> Installing Docker (Amazon Linux 2023 / Ubuntu) and rsync"
 if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get update
-  sudo apt-get install -y ca-certificates curl gnupg
+  sudo apt-get install -y ca-certificates curl gnupg rsync
   sudo install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   echo \
@@ -20,7 +20,7 @@ if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   sudo usermod -aG docker "$USER"
 elif command -v dnf >/dev/null 2>&1; then
-  sudo dnf install -y docker
+  sudo dnf install -y docker rsync
   sudo systemctl enable --now docker
   sudo usermod -aG docker "$USER"
   DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
@@ -29,7 +29,7 @@ elif command -v dnf >/dev/null 2>&1; then
     -o "$DOCKER_CONFIG/cli-plugins/docker-compose"
   chmod +x "$DOCKER_CONFIG/cli-plugins/docker-compose"
 else
-  echo "Unsupported OS. Install Docker + Compose plugin manually." >&2
+  echo "Unsupported OS. Install Docker + Compose plugin + rsync manually." >&2
   exit 1
 fi
 
