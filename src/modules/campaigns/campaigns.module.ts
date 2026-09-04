@@ -3,9 +3,10 @@ import { CampaignsService } from './campaigns.service';
 import { CampaignsController } from './campaigns.controller';
 import { PrismaModule } from '@/prisma/prisma.module';
 import { QueueModule } from '@/queue/queue.module';
+import { DashboardModule } from '@/modules/dashboard/dashboard.module';
 
 @Module({
-  imports: [PrismaModule, QueueModule],
+  imports: [PrismaModule, QueueModule, DashboardModule],
   providers: [CampaignsService],
   controllers: [CampaignsController],
   exports: [CampaignsService],

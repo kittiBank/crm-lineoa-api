@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { BroadcastQueueService } from '@/queue/broadcast-queue.service';
+import { DashboardService } from '@/modules/dashboard/dashboard.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 
@@ -17,6 +18,7 @@ export class CampaignsService {
   constructor(
     private prisma: PrismaService,
     private broadcastQueueService: BroadcastQueueService,
+    private dashboardService: DashboardService,
   ) {}
 
   async create(userId: string, createCampaignDto: CreateCampaignDto) {
@@ -51,6 +53,8 @@ export class CampaignsService {
       },
       include: this.defaultInclude(),
     });
+
+    await this.dashboardService.invalidateOverviewCache(userId);
 
     if (status === 'processing') {
       await this.queueBroadcast(userId, broadcast.id);

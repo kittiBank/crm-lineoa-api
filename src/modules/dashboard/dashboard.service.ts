@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { RedisService } from '@/redis/redis.service';
+import {
+  DASHBOARD_CACHE_TTL_SECONDS,
+  dashboardOverviewCacheKey,
+  dashboardOverviewCacheKeys,
+} from './dashboard-cache';
 import {
   DashboardPeriod,
   QueryDashboardDto,
@@ -36,9 +42,35 @@ type Range = {
 
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private redis: RedisService,
+  ) {}
 
   async getOverview(userId: string, query: QueryDashboardDto) {
+    const period = resolvePeriod(query);
+    const cacheKey = dashboardOverviewCacheKey(userId, period);
+    const cached = await this.redis.getJson<
+      Awaited<ReturnType<DashboardService['buildOverview']>>
+    >(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const overview = await this.buildOverview(userId, query);
+    await this.redis.setJson(
+      cacheKey,
+      overview,
+      DASHBOARD_CACHE_TTL_SECONDS,
+    );
+    return overview;
+  }
+
+  async invalidateOverviewCache(userId: string): Promise<void> {
+    await this.redis.del(...dashboardOverviewCacheKeys(userId));
+  }
+
+  private async buildOverview(userId: string, query: QueryDashboardDto) {
     const range = resolveDashboardRange(query);
     const now = new Date();
 
