@@ -4,6 +4,7 @@ import { WinstonModule } from 'nest-winston';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { LineModule } from './modules/line/line.module';
@@ -29,6 +30,7 @@ import { MetricsModule } from './common/metrics/metrics.module';
     MetricsModule,
     WinstonModule.forRoot(winstonConfig),
     PrismaModule,
+    RedisModule,
     AuthModule,
     UsersModule,
     LineModule,

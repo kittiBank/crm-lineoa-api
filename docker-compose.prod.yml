@@ -21,10 +21,13 @@ services:
       RUN_MIGRATIONS: 'true'
       # In-compose service hostnames (override localhost from local .env)
       AMQP_URL: ${AMQP_URL:-amqp://crm:changeme@rabbitmq:5672}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
       - '${API_HOST_PORT:-3000}:3000'
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - crm_network
@@ -52,8 +55,11 @@ services:
       NODE_ENV: production
       RUN_MIGRATIONS: 'false'
       AMQP_URL: ${AMQP_URL:-amqp://crm:changeme@rabbitmq:5672}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       api:
         condition: service_healthy
@@ -78,8 +84,23 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: crm_lineoa_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - crm_network
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   rabbitmq_data:
+  redis_data:
 
 networks:
   crm_network:
