@@ -81,6 +81,46 @@ export class TemplatesController {
     return this.templatesService.uploadImage(req.user.id, image);
   }
 
+  @Post('media/video')
+  @UseInterceptors(
+    FileInterceptor('video', {
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload a template video to object storage',
+    description:
+      'Uploads a video to S3/MinIO and returns a public URL for use in message templates',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['video'],
+      properties: {
+        video: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiCreatedResponse({ description: 'Video uploaded' })
+  async uploadVideo(
+    @Request() req: { user: { id: string } },
+    @UploadedFile()
+    video:
+      | {
+          buffer: Buffer;
+          mimetype: string;
+          originalname?: string;
+        }
+      | undefined,
+  ) {
+    if (!video) {
+      throw new BadRequestException('Video file is required');
+    }
+
+    return this.templatesService.uploadVideo(req.user.id, video);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get message template by ID' })
   @ApiOkResponse({ description: 'Template detail' })
