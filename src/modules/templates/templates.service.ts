@@ -15,6 +15,7 @@ import { validateFlexContents } from './flex-contents.validator';
 const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'flex', 'carousel']);
 
 const MAX_TEMPLATE_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_TEMPLATE_VIDEO_BYTES = 50 * 1024 * 1024;
 const TEMPLATE_MEDIA_DISPLAY_TTL_SECONDS = 60 * 60;
 
 @Injectable()
@@ -140,6 +141,65 @@ export class TemplatesService {
       );
       throw new BadRequestException(
         'Failed to upload image to storage. Check S3/MinIO configuration.',
+      );
+    }
+  }
+
+  async uploadVideo(
+    userId: string,
+    file:
+      | {
+          buffer: Buffer;
+          mimetype: string;
+          originalname?: string;
+        }
+      | undefined,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Video file is required');
+    }
+
+    if (!file.mimetype.startsWith('video/')) {
+      throw new BadRequestException('File must be a video');
+    }
+
+    if (file.buffer.length > MAX_TEMPLATE_VIDEO_BYTES) {
+      throw new BadRequestException('Video must be 50 MB or smaller');
+    }
+
+    const extension = this.resolveVideoExtension(
+      file.mimetype,
+      file.originalname,
+    );
+    const storageKey = this.storageService.buildKey(
+      'templates',
+      `${userId}.${extension}`,
+    );
+
+    try {
+      const uploadResult = await this.storageService.upload(
+        storageKey,
+        file.buffer,
+        file.mimetype,
+      );
+      const displayUrl = await this.storageService.getPresignedUrl(
+        uploadResult.key,
+        TEMPLATE_MEDIA_DISPLAY_TTL_SECONDS,
+      );
+
+      return {
+        url: uploadResult.url,
+        displayUrl,
+        key: uploadResult.key,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Template video upload failed for user ${userId}: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      throw new BadRequestException(
+        'Failed to upload video to storage. Check S3/MinIO configuration.',
       );
     }
   }
@@ -284,6 +344,9 @@ export class TemplatesService {
       imageUrl: message.imageUrl
         ? this.storageService.toStablePublicUrl(message.imageUrl)
         : message.imageUrl,
+      videoUrl: message.videoUrl
+        ? this.storageService.toStablePublicUrl(message.videoUrl)
+        : message.videoUrl,
       previewImageUrl: message.previewImageUrl
         ? this.storageService.toStablePublicUrl(message.previewImageUrl)
         : message.previewImageUrl,
@@ -308,6 +371,12 @@ export class TemplatesService {
               TEMPLATE_MEDIA_DISPLAY_TTL_SECONDS,
             )
           : message.imageUrl,
+        videoUrl: message.videoUrl
+          ? await this.storageService.resolveAccessibleUrl(
+              message.videoUrl,
+              TEMPLATE_MEDIA_DISPLAY_TTL_SECONDS,
+            )
+          : message.videoUrl,
         previewImageUrl: message.previewImageUrl
           ? await this.storageService.resolveAccessibleUrl(
               message.previewImageUrl,
@@ -376,6 +445,9 @@ export class TemplatesService {
     if (typeof message.imageUrl === 'string' && message.imageUrl) {
       urls.push(message.imageUrl);
     }
+    if (typeof message.videoUrl === 'string' && message.videoUrl) {
+      urls.push(message.videoUrl);
+    }
     if (
       typeof message.previewImageUrl === 'string' &&
       message.previewImageUrl
@@ -416,5 +488,27 @@ export class TemplatesService {
     }
 
     return 'bin';
+  }
+
+  private resolveVideoExtension(
+    mimeType: string,
+    originalname?: string,
+  ): string {
+    if (mimeType === 'video/mp4') {
+      return 'mp4';
+    }
+    if (mimeType === 'video/quicktime') {
+      return 'mov';
+    }
+    if (mimeType === 'video/webm') {
+      return 'webm';
+    }
+
+    const fromName = originalname?.split('.').pop()?.toLowerCase();
+    if (fromName && /^[a-z0-9]+$/.test(fromName)) {
+      return fromName;
+    }
+
+    return 'mp4';
   }
 }
