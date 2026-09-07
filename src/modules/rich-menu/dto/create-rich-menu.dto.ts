@@ -2,13 +2,37 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsArray,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class RichMenuBoundsDto {
+  @ApiProperty({ example: 0 })
+  @IsInt()
+  @Min(0)
+  x!: number;
+
+  @ApiProperty({ example: 0 })
+  @IsInt()
+  @Min(0)
+  y!: number;
+
+  @ApiProperty({ example: 833 })
+  @IsInt()
+  @Min(1)
+  width!: number;
+
+  @ApiProperty({ example: 843 })
+  @IsInt()
+  @Min(1)
+  height!: number;
+}
 
 export class RichMenuAreaDto {
   @ApiProperty({ example: 'Register' })
@@ -46,6 +70,16 @@ export class RichMenuAreaDto {
   @IsOptional()
   @IsIn(['date', 'time', 'datetime'])
   mode?: 'date' | 'time' | 'datetime';
+
+  @ApiProperty({
+    required: false,
+    type: RichMenuBoundsDto,
+    description: 'Required for big/compact/custom layouts; optional for legacy grids',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RichMenuBoundsDto)
+  bounds?: RichMenuBoundsDto;
 }
 
 export class CreateRichMenuDto {
@@ -65,7 +99,7 @@ export class CreateRichMenuDto {
   @MaxLength(14)
   chatBarText!: string;
 
-  @ApiProperty({ example: 'large-2x3' })
+  @ApiProperty({ example: 'big', description: 'big | compact | custom (or legacy layout id)' })
   @IsString()
   @IsNotEmpty()
   layoutId!: string;

@@ -95,10 +95,15 @@ export class RichMenuController {
         name: { type: 'string', example: 'Default Guest Menu' },
         menuType: { type: 'string', enum: ['default', 'member'] },
         chatBarText: { type: 'string', example: 'Menu' },
-        layoutId: { type: 'string', example: 'large-2x3' },
+        layoutId: {
+          type: 'string',
+          example: 'big',
+          description: 'big | compact | custom (or legacy grid id)',
+        },
         areas: {
           type: 'string',
-          description: 'JSON string of area action configs',
+          description:
+            'JSON string of area configs (label, actionType, optional action fields, and bounds {x,y,width,height})',
         },
         image: { type: 'string', format: 'binary' },
       },

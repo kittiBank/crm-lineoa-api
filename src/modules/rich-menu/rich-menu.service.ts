@@ -11,7 +11,12 @@ import { PrismaService } from '@/prisma/prisma.service';
 import { LineAccountRepository } from '../line/repositories/line-account.repository';
 import { StorageService } from '../storage/storage.service';
 import { CreateRichMenuDto } from './dto/create-rich-menu.dto';
-import { getLayoutById } from './constants/layouts';
+import {
+  getLayoutById,
+  LINE_RICH_MENU_MAX_AREAS,
+  validateBoundsWithinSize,
+  type RichMenuBounds,
+} from './constants/layouts';
 
 @Injectable()
 export class RichMenuService {
@@ -130,13 +135,51 @@ export class RichMenuService {
       throw new BadRequestException('Image must be 1 MB or smaller');
     }
 
-    const layout = getLayoutById(dto.layoutId);
+    let layout;
+    try {
+      layout = getLayoutById(dto.layoutId);
+    } catch {
+      throw new BadRequestException(`Unknown layout: ${dto.layoutId}`);
+    }
 
-    if (dto.areas.length !== layout.cells.length) {
+    if (dto.areas.length === 0) {
+      throw new BadRequestException('At least one tap area is required');
+    }
+
+    if (dto.areas.length > LINE_RICH_MENU_MAX_AREAS) {
+      throw new BadRequestException(
+        `LINE rich menus support at most ${LINE_RICH_MENU_MAX_AREAS} areas`,
+      );
+    }
+
+    if (
+      !layout.requiresCustomBounds &&
+      layout.cells.length > 0 &&
+      dto.areas.length !== layout.cells.length &&
+      !dto.areas.every((area) => area.bounds)
+    ) {
       throw new BadRequestException(
         `Expected ${layout.cells.length} areas for layout "${dto.layoutId}"`,
       );
     }
+
+    const resolvedBounds: RichMenuBounds[] = dto.areas.map((area, index) => {
+      const bounds = area.bounds ?? layout.cells[index];
+      if (!bounds) {
+        throw new BadRequestException(
+          `Area ${index + 1} ("${area.label}") requires bounds`,
+        );
+      }
+
+      const boundsError = validateBoundsWithinSize(bounds, layout.size);
+      if (boundsError) {
+        throw new BadRequestException(
+          `Area ${index + 1} ("${area.label}"): ${boundsError}`,
+        );
+      }
+
+      return bounds;
+    });
 
     const lineAccount =
       await this.lineAccountRepository.getLineAccountByUserId(userId);
@@ -185,9 +228,14 @@ export class RichMenuService {
       channelSecret,
     });
 
-    const lineAreas = layout.cells.map((bounds, index) => ({
+    const lineAreas = resolvedBounds.map((bounds, index) => ({
       bounds,
       action: this.buildLineAction(dto.areas[index]),
+    }));
+
+    const areasToPersist = dto.areas.map((area, index) => ({
+      ...area,
+      bounds: resolvedBounds[index],
     }));
 
     let lineRichMenuId: string;
@@ -240,7 +288,7 @@ export class RichMenuService {
             selected: false,
             sizeWidth: layout.size.width,
             sizeHeight: layout.size.height,
-            areas: dto.areas as unknown as Prisma.InputJsonValue,
+            areas: areasToPersist as unknown as Prisma.InputJsonValue,
             isActive: true,
           },
         })
