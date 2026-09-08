@@ -12,25 +12,35 @@ import {
 } from 'class-validator';
 import { LineUserTier } from '@/modules/line/types/line-user-tier';
 import {
+  AUDIENCE_MATCH_MODES,
   AUDIENCE_USER_TYPES,
+  AudienceMatchMode,
   AudienceUserTier,
   AudienceUserType,
 } from './audience-criteria.dto';
 import {
-  AUDIENCE_SEGMENT_TYPES,
-  AudienceSegmentType,
+  AUDIENCE_WRITABLE_TYPES,
+  AudienceWritableType,
 } from './create-audience.dto';
 
 export class EstimateAudienceDto {
   @ApiProperty({
-    enum: AUDIENCE_SEGMENT_TYPES,
-    example: 'all',
-    description:
-      'Audience type to estimate. LINE Insight is used only when type = all.',
+    enum: AUDIENCE_WRITABLE_TYPES,
+    example: 'active',
+    description: 'Custom audience type to estimate.',
   })
   @IsString()
-  @IsIn(AUDIENCE_SEGMENT_TYPES)
-  type!: AudienceSegmentType;
+  @IsIn(AUDIENCE_WRITABLE_TYPES)
+  type!: AudienceWritableType;
+
+  @ApiPropertyOptional({
+    enum: AUDIENCE_MATCH_MODES,
+    example: 'and',
+    description: 'How to combine rules when type = combined. Defaults to and.',
+  })
+  @IsOptional()
+  @IsIn(AUDIENCE_MATCH_MODES)
+  match?: AudienceMatchMode;
 
   @ApiPropertyOptional({
     isArray: true,

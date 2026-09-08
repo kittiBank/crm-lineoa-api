@@ -6,7 +6,7 @@ export function allFollowersCacheKey(lineAccountId: string): string {
 
 export function audienceDbCountCacheKey(
   lineAccountId: string,
-  type: 'active' | 'new' | 'user_type',
+  type: 'active' | 'new' | 'user_type' | 'combined',
   suffix: string,
 ): string {
   return `audience:count:${type}:${lineAccountId}:${suffix}`;

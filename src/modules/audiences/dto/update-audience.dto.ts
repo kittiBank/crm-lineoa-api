@@ -10,8 +10,8 @@ import {
 } from 'class-validator';
 import { AudienceCriteriaDto } from './audience-criteria.dto';
 import {
-  AUDIENCE_SEGMENT_TYPES,
-  AudienceSegmentType,
+  AUDIENCE_WRITABLE_TYPES,
+  AudienceWritableType,
 } from './create-audience.dto';
 
 export class UpdateAudienceDto {
@@ -28,12 +28,14 @@ export class UpdateAudienceDto {
 
   @ApiProperty({
     required: false,
-    enum: AUDIENCE_SEGMENT_TYPES,
+    enum: AUDIENCE_WRITABLE_TYPES,
+    description:
+      'Custom audience type. All LINE users is a broadcast option, not a saved audience.',
   })
   @IsOptional()
   @IsString()
-  @IsIn(AUDIENCE_SEGMENT_TYPES)
-  type?: AudienceSegmentType;
+  @IsIn(AUDIENCE_WRITABLE_TYPES)
+  type?: AudienceWritableType;
 
   @ApiProperty({ required: false, type: AudienceCriteriaDto })
   @IsOptional()

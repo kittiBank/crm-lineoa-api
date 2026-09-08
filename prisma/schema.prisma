@@ -168,7 +168,7 @@ model Audience {
   userId      String
   name        String
   description String?
-  type        String // all | user_type | active | new | segment
+  type        String // all | user_type | active | new | combined | segment
   criteria    Json    @default("{}")
   isActive    Boolean @default(true)
 

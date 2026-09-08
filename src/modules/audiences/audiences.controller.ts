@@ -47,8 +47,8 @@ export class AudiencesController {
       example: {
         success: true,
         data: {
-          type: 'all',
-          criteria: {},
+          type: 'active',
+          criteria: { activityDays: 30 },
           memberCount: 1234,
         },
       },

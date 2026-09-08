@@ -15,15 +15,29 @@ import {
 export const AUDIENCE_USER_TYPES = ['Member', 'Guest'] as const;
 export type AudienceUserType = (typeof AUDIENCE_USER_TYPES)[number];
 
+export const AUDIENCE_MATCH_MODES = ['and', 'or'] as const;
+export type AudienceMatchMode = (typeof AUDIENCE_MATCH_MODES)[number];
+
 export type AudienceUserTier = LineUserTier;
 
 export class AudienceCriteriaDto {
   @ApiProperty({
     required: false,
+    enum: AUDIENCE_MATCH_MODES,
+    example: 'and',
+    description:
+      'How to combine targeting rules when type = combined. Defaults to and.',
+  })
+  @IsOptional()
+  @IsIn(AUDIENCE_MATCH_MODES)
+  match?: AudienceMatchMode;
+
+  @ApiProperty({
+    required: false,
     isArray: true,
     enum: AUDIENCE_USER_TYPES,
     example: ['Member', 'Guest'],
-    description: 'Used when type = user_type.',
+    description: 'Used when type = user_type or combined.',
   })
   @IsOptional()
   @IsArray()
@@ -37,7 +51,7 @@ export class AudienceCriteriaDto {
     enum: LineUserTier,
     example: [LineUserTier.Silver, LineUserTier.Gold],
     description:
-      'Optional user tiers when type = user_type. Leave empty to include all tiers.',
+      'Optional user tiers when user type is selected. Leave empty to include all tiers.',
   })
   @IsOptional()
   @IsArray()
@@ -48,7 +62,7 @@ export class AudienceCriteriaDto {
   @ApiProperty({
     required: false,
     example: 30,
-    description: 'Days of recent activity when type = active',
+    description: 'Days of recent activity when type = active or combined',
   })
   @IsOptional()
   @IsInt()
@@ -58,7 +72,7 @@ export class AudienceCriteriaDto {
   @ApiProperty({
     required: false,
     example: 14,
-    description: 'Days since follow when type = new',
+    description: 'Days since follow when type = new or combined',
   })
   @IsOptional()
   @IsInt()

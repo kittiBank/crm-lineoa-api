@@ -15,6 +15,7 @@ import {
 } from './audience-followers-cache';
 import {
   AudienceCriteriaDto,
+  AudienceMatchMode,
   AudienceUserTier,
   AudienceUserType,
 } from './dto/audience-criteria.dto';
@@ -26,6 +27,7 @@ import { EstimateAudienceDto } from './dto/estimate-audience.dto';
 import { UpdateAudienceDto } from './dto/update-audience.dto';
 
 type StoredCriteria = {
+  match?: AudienceMatchMode;
   userTypes?: AudienceUserType[];
   userTiers?: AudienceUserTier[];
   activityDays?: number;
@@ -159,7 +161,7 @@ export class AudiencesService {
 
   /**
    * Count following LINE users matching the audience segment rules.
-   * Type `all` uses LINE Insight. user_type/active/new counts come from `line_users`.
+   * Type `all` uses LINE Insight. Other counts come from `line_users`.
    * All are Redis-cached for 5 minutes.
    */
   async countMembers(
@@ -183,7 +185,12 @@ export class AudiencesService {
       return 0;
     }
 
-    if (type === 'active' || type === 'new' || type === 'user_type') {
+    if (
+      type === 'active' ||
+      type === 'new' ||
+      type === 'user_type' ||
+      type === 'combined'
+    ) {
       return this.getCachedCount(
         audienceDbCountCacheKey(
           lineAccountId,
@@ -198,7 +205,7 @@ export class AudiencesService {
   }
 
   private dbCountCacheSuffix(
-    type: 'active' | 'new' | 'user_type',
+    type: 'active' | 'new' | 'user_type' | 'combined',
     criteria: StoredCriteria,
   ): string {
     if (type === 'active') {
@@ -207,6 +214,20 @@ export class AudiencesService {
 
     if (type === 'new') {
       return String(criteria.newFollowerDays ?? 7);
+    }
+
+    if (type === 'combined') {
+      const match = criteria.match === 'or' ? 'or' : 'and';
+      const userTypes = [...(criteria.userTypes ?? [])].sort().join(',');
+      const userTiers =
+        [...(criteria.userTiers ?? [])].sort().join(',') || 'all';
+      return [
+        match,
+        userTypes || '-',
+        userTiers,
+        String(criteria.activityDays ?? '-'),
+        String(criteria.newFollowerDays ?? '-'),
+      ].join(':');
     }
 
     const userTypes = [...(criteria.userTypes ?? [])].sort().join(',');
@@ -228,44 +249,93 @@ export class AudiencesService {
       case 'all':
         return base;
       case 'user_type': {
-        const userTypes = (criteria.userTypes ?? []).filter(
-          (value) => value === 'Member' || value === 'Guest',
-        );
-        if (userTypes.length === 0) {
+        const clause = this.buildUserTypeClause(criteria);
+        if (!clause) {
           return null;
         }
-
-        const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
-
-        return {
-          ...base,
-          userType: { in: userTypes },
-          ...(userTiers.length > 0 ? { userTier: { in: userTiers } } : {}),
-        };
+        return { ...base, ...clause };
       }
       case 'active': {
-        const days = criteria.activityDays ?? 30;
-        const since = new Date();
-        since.setDate(since.getDate() - days);
-        return {
-          ...base,
-          lastActivity: { gte: since },
-        };
+        const clause = this.buildActiveClause(criteria);
+        if (!clause) {
+          return null;
+        }
+        return { ...base, ...clause };
       }
       case 'new': {
-        const days = criteria.newFollowerDays ?? 7;
-        const since = new Date();
-        since.setDate(since.getDate() - days);
-        return {
-          ...base,
-          followedAt: { gte: since },
-        };
+        const clause = this.buildNewClause(criteria);
+        if (!clause) {
+          return null;
+        }
+        return { ...base, ...clause };
+      }
+      case 'combined': {
+        const clauses = [
+          this.buildUserTypeClause(criteria),
+          this.buildActiveClause(criteria),
+          this.buildNewClause(criteria),
+        ].filter((clause): clause is Prisma.LineUserWhereInput =>
+          Boolean(clause),
+        );
+
+        if (clauses.length === 0) {
+          return null;
+        }
+        if (clauses.length === 1) {
+          return { ...base, ...clauses[0] };
+        }
+        if (criteria.match === 'or') {
+          return { ...base, OR: clauses };
+        }
+        return { ...base, AND: clauses };
       }
       case 'segment':
         return null;
       default:
         return base;
     }
+  }
+
+  private buildUserTypeClause(
+    criteria: StoredCriteria,
+  ): Prisma.LineUserWhereInput | null {
+    const userTypes = (criteria.userTypes ?? []).filter(
+      (value) => value === 'Member' || value === 'Guest',
+    );
+    if (userTypes.length === 0) {
+      return null;
+    }
+
+    const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
+
+    return {
+      userType: { in: userTypes },
+      ...(userTiers.length > 0 ? { userTier: { in: userTiers } } : {}),
+    };
+  }
+
+  private buildActiveClause(
+    criteria: StoredCriteria,
+  ): Prisma.LineUserWhereInput | null {
+    if (!criteria.activityDays || criteria.activityDays < 1) {
+      return null;
+    }
+
+    const since = new Date();
+    since.setDate(since.getDate() - criteria.activityDays);
+    return { lastActivity: { gte: since } };
+  }
+
+  private buildNewClause(
+    criteria: StoredCriteria,
+  ): Prisma.LineUserWhereInput | null {
+    if (!criteria.newFollowerDays || criteria.newFollowerDays < 1) {
+      return null;
+    }
+
+    const since = new Date();
+    since.setDate(since.getDate() - criteria.newFollowerDays);
+    return { followedAt: { gte: since } };
   }
 
   private normalizeAndValidateCriteria(
@@ -276,24 +346,8 @@ export class AudiencesService {
       throw new BadRequestException('Custom segments are not available yet');
     }
 
-    const userTypes = criteria.userTypes ?? [];
-
     if (type === 'user_type') {
-      const supported = userTypes.filter(
-        (value) => value === 'Member' || value === 'Guest',
-      );
-      if (supported.length === 0) {
-        throw new BadRequestException(
-          'Select at least one user type (Member or Guest)',
-        );
-      }
-
-      const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
-
-      return {
-        userTypes: supported,
-        ...(userTiers.length > 0 ? { userTiers } : {}),
-      };
+      return this.normalizeUserTypeCriteria(criteria);
     }
 
     if (type === 'active') {
@@ -314,8 +368,73 @@ export class AudiencesService {
       return { newFollowerDays: criteria.newFollowerDays };
     }
 
-    // type = all
+    if (type === 'combined') {
+      return this.normalizeCombinedCriteria(criteria);
+    }
+
     return {};
+  }
+
+  private normalizeUserTypeCriteria(
+    criteria: AudienceCriteriaDto | StoredCriteria,
+  ): StoredCriteria {
+    const supported = (criteria.userTypes ?? []).filter(
+      (value) => value === 'Member' || value === 'Guest',
+    );
+    if (supported.length === 0) {
+      throw new BadRequestException(
+        'Select at least one user type (Member or Guest)',
+      );
+    }
+
+    const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
+
+    return {
+      userTypes: supported,
+      ...(userTiers.length > 0 ? { userTiers } : {}),
+    };
+  }
+
+  private normalizeCombinedCriteria(
+    criteria: AudienceCriteriaDto | StoredCriteria,
+  ): StoredCriteria {
+    const match: AudienceMatchMode = criteria.match === 'or' ? 'or' : 'and';
+    const result: StoredCriteria = { match };
+    let groupCount = 0;
+
+    const hasUserTypes = (criteria.userTypes ?? []).length > 0;
+    if (hasUserTypes) {
+      Object.assign(result, this.normalizeUserTypeCriteria(criteria));
+      groupCount += 1;
+    }
+
+    if (criteria.activityDays) {
+      if (criteria.activityDays < 1) {
+        throw new BadRequestException(
+          'activityDays must be at least 1 for combined audiences',
+        );
+      }
+      result.activityDays = criteria.activityDays;
+      groupCount += 1;
+    }
+
+    if (criteria.newFollowerDays) {
+      if (criteria.newFollowerDays < 1) {
+        throw new BadRequestException(
+          'newFollowerDays must be at least 1 for combined audiences',
+        );
+      }
+      result.newFollowerDays = criteria.newFollowerDays;
+      groupCount += 1;
+    }
+
+    if (groupCount < 2) {
+      throw new BadRequestException(
+        'Combined audiences require at least two targeting rules',
+      );
+    }
+
+    return result;
   }
 
   private parseCriteria(value: Prisma.JsonValue): StoredCriteria {
@@ -325,6 +444,10 @@ export class AudiencesService {
 
     const record = value as Record<string, unknown>;
     const criteria: StoredCriteria = {};
+
+    if (record.match === 'and' || record.match === 'or') {
+      criteria.match = record.match;
+    }
 
     if (Array.isArray(record.userTypes)) {
       criteria.userTypes = record.userTypes.filter(

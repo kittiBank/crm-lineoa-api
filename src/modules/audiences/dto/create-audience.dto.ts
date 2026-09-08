@@ -15,10 +15,20 @@ export const AUDIENCE_SEGMENT_TYPES = [
   'user_type',
   'active',
   'new',
+  'combined',
   'segment',
 ] as const;
 
 export type AudienceSegmentType = (typeof AUDIENCE_SEGMENT_TYPES)[number];
+
+export const AUDIENCE_WRITABLE_TYPES = [
+  'user_type',
+  'active',
+  'new',
+  'combined',
+] as const;
+
+export type AudienceWritableType = (typeof AUDIENCE_WRITABLE_TYPES)[number];
 
 export class CreateAudienceDto {
   @ApiProperty({ example: 'Active Members' })
@@ -35,12 +45,14 @@ export class CreateAudienceDto {
   description?: string;
 
   @ApiProperty({
-    enum: AUDIENCE_SEGMENT_TYPES,
+    enum: AUDIENCE_WRITABLE_TYPES,
     example: 'user_type',
+    description:
+      'Custom audience type. All LINE users is a broadcast option, not a saved audience.',
   })
   @IsString()
-  @IsIn(AUDIENCE_SEGMENT_TYPES)
-  type!: AudienceSegmentType;
+  @IsIn(AUDIENCE_WRITABLE_TYPES)
+  type!: AudienceWritableType;
 
   @ApiProperty({ type: AudienceCriteriaDto })
   @ValidateNested()
