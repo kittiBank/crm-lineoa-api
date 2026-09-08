@@ -78,6 +78,12 @@ model LineAccount {
 // LINE Users & Messages
 // ============================================================================
 
+enum UserTier {
+  Silver
+  Gold
+  Platinum
+}
+
 model LineUser {
   id              String    @id @default(cuid())
   lineAccountId   String
@@ -86,6 +92,7 @@ model LineUser {
   pictureUrl      String?
   status          String    @default("following") // following, blocked
   userType        String    @default("Guest") // Guest | Member
+  userTier        UserTier?
   phone           String?
   phoneVerifiedAt DateTime?
 
@@ -107,6 +114,7 @@ model LineUser {
   @@index([lineAccountId])
   @@index([lineUserId])
   @@index([lineAccountId, userType])
+  @@index([lineAccountId, userTier])
   @@map("line_users")
 }
 

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { AudiencesService } from './audiences.service';
 import { CreateAudienceDto } from './dto/create-audience.dto';
+import { EstimateAudienceDto } from './dto/estimate-audience.dto';
 import { UpdateAudienceDto } from './dto/update-audience.dto';
 
 @ApiTags('Audiences')
@@ -33,6 +35,31 @@ export class AudiencesController {
   @ApiOkResponse({ description: 'Audience list' })
   async findAll(@Request() req: { user: { id: string } }) {
     return this.audiencesService.findAll(req.user.id);
+  }
+
+  @Get('estimate')
+  @ApiOperation({
+    summary: 'Preview estimated members for audience criteria',
+  })
+  @ApiOkResponse({
+    description: 'Estimated member count',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          type: 'all',
+          criteria: {},
+          memberCount: 1234,
+        },
+      },
+    },
+  })
+  async estimate(
+    @Request() req: { user: { id: string } },
+    @Query() query: EstimateAudienceDto,
+  ) {
+    const data = await this.audiencesService.estimate(req.user.id, query);
+    return { success: true, data };
   }
 
   @Get(':id')

@@ -4,26 +4,43 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { LineService } from '@/modules/line/line.service';
+import { isLineUserTier } from '@/modules/line/types/line-user-tier';
 import { PrismaService } from '@/prisma/prisma.service';
+import { RedisService } from '@/redis/redis.service';
+import {
+  AUDIENCE_COUNT_CACHE_TTL_SECONDS,
+  allFollowersCacheKey,
+  audienceDbCountCacheKey,
+} from './audience-followers-cache';
 import {
   AudienceCriteriaDto,
+  AudienceUserTier,
   AudienceUserType,
 } from './dto/audience-criteria.dto';
 import {
   AudienceSegmentType,
   CreateAudienceDto,
 } from './dto/create-audience.dto';
+import { EstimateAudienceDto } from './dto/estimate-audience.dto';
 import { UpdateAudienceDto } from './dto/update-audience.dto';
 
 type StoredCriteria = {
   userTypes?: AudienceUserType[];
+  userTiers?: AudienceUserTier[];
   activityDays?: number;
   newFollowerDays?: number;
 };
 
 @Injectable()
 export class AudiencesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly countInflight = new Map<string, Promise<number>>();
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lineService: LineService,
+    private readonly redis: RedisService,
+  ) {}
 
   async findAll(userId: string) {
     const items = await this.prisma.audience.findMany({
@@ -33,7 +50,7 @@ export class AudiencesService {
 
     const lineAccountId = await this.getLineAccountId(userId);
     return Promise.all(
-      items.map((item) => this.toResponse(item, lineAccountId)),
+      items.map((item) => this.toResponse(item, userId, lineAccountId)),
     );
   }
 
@@ -47,7 +64,24 @@ export class AudiencesService {
     }
 
     const lineAccountId = await this.getLineAccountId(userId);
-    return this.toResponse(item, lineAccountId);
+    return this.toResponse(item, userId, lineAccountId);
+  }
+
+  async estimate(userId: string, query: EstimateAudienceDto) {
+    const criteria = this.normalizeAndValidateCriteria(query.type, query);
+    const lineAccountId = await this.getLineAccountId(userId);
+    const memberCount = await this.countMembers(
+      userId,
+      lineAccountId,
+      query.type,
+      criteria,
+    );
+
+    return {
+      type: query.type,
+      criteria,
+      memberCount,
+    };
   }
 
   async create(userId: string, dto: CreateAudienceDto) {
@@ -65,7 +99,7 @@ export class AudiencesService {
     });
 
     const lineAccountId = await this.getLineAccountId(userId);
-    return this.toResponse(item, lineAccountId);
+    return this.toResponse(item, userId, lineAccountId);
   }
 
   async update(userId: string, id: string, dto: UpdateAudienceDto) {
@@ -104,7 +138,7 @@ export class AudiencesService {
     });
 
     const lineAccountId = await this.getLineAccountId(userId);
-    return this.toResponse(item, lineAccountId);
+    return this.toResponse(item, userId, lineAccountId);
   }
 
   async remove(userId: string, id: string) {
@@ -125,9 +159,11 @@ export class AudiencesService {
 
   /**
    * Count following LINE users matching the audience segment rules.
-   * VIP is ignored until VIP import is implemented.
+   * Type `all` uses LINE Insight. user_type/active/new counts come from `line_users`.
+   * All are Redis-cached for 5 minutes.
    */
   async countMembers(
+    userId: string,
     lineAccountId: string | null,
     type: AudienceSegmentType,
     criteria: StoredCriteria,
@@ -136,12 +172,46 @@ export class AudiencesService {
       return 0;
     }
 
+    if (type === 'all') {
+      return this.getCachedCount(allFollowersCacheKey(lineAccountId), () =>
+        this.lineService.getFollowerCountForUser(userId),
+      );
+    }
+
     const where = this.buildRecipientWhere(lineAccountId, type, criteria);
     if (!where) {
       return 0;
     }
 
+    if (type === 'active' || type === 'new' || type === 'user_type') {
+      return this.getCachedCount(
+        audienceDbCountCacheKey(
+          lineAccountId,
+          type,
+          this.dbCountCacheSuffix(type, criteria),
+        ),
+        () => this.prisma.lineUser.count({ where }),
+      );
+    }
+
     return this.prisma.lineUser.count({ where });
+  }
+
+  private dbCountCacheSuffix(
+    type: 'active' | 'new' | 'user_type',
+    criteria: StoredCriteria,
+  ): string {
+    if (type === 'active') {
+      return String(criteria.activityDays ?? 30);
+    }
+
+    if (type === 'new') {
+      return String(criteria.newFollowerDays ?? 7);
+    }
+
+    const userTypes = [...(criteria.userTypes ?? [])].sort().join(',');
+    const userTiers = [...(criteria.userTiers ?? [])].sort().join(',') || 'all';
+    return `${userTypes}:${userTiers}`;
   }
 
   buildRecipientWhere(
@@ -164,9 +234,13 @@ export class AudiencesService {
         if (userTypes.length === 0) {
           return null;
         }
+
+        const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
+
         return {
           ...base,
           userType: { in: userTypes },
+          ...(userTiers.length > 0 ? { userTier: { in: userTiers } } : {}),
         };
       }
       case 'active': {
@@ -203,9 +277,6 @@ export class AudiencesService {
     }
 
     const userTypes = criteria.userTypes ?? [];
-    if (userTypes.includes('VIP')) {
-      throw new BadRequestException('VIP targeting is not available yet');
-    }
 
     if (type === 'user_type') {
       const supported = userTypes.filter(
@@ -216,7 +287,13 @@ export class AudiencesService {
           'Select at least one user type (Member or Guest)',
         );
       }
-      return { userTypes: supported };
+
+      const userTiers = (criteria.userTiers ?? []).filter(isLineUserTier);
+
+      return {
+        userTypes: supported,
+        ...(userTiers.length > 0 ? { userTiers } : {}),
+      };
     }
 
     if (type === 'active') {
@@ -252,8 +329,12 @@ export class AudiencesService {
     if (Array.isArray(record.userTypes)) {
       criteria.userTypes = record.userTypes.filter(
         (item): item is AudienceUserType =>
-          item === 'Member' || item === 'Guest' || item === 'VIP',
+          item === 'Member' || item === 'Guest',
       );
+    }
+
+    if (Array.isArray(record.userTiers)) {
+      criteria.userTiers = record.userTiers.filter(isLineUserTier);
     }
 
     if (typeof record.activityDays === 'number') {
@@ -275,6 +356,41 @@ export class AudiencesService {
     return lineAccount?.id ?? null;
   }
 
+  private async getCachedCount(
+    cacheKey: string,
+    loader: () => Promise<number>,
+  ): Promise<number> {
+    const inflight = this.countInflight.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const promise = this.loadCachedCount(cacheKey, loader).finally(() => {
+      this.countInflight.delete(cacheKey);
+    });
+
+    this.countInflight.set(cacheKey, promise);
+    return promise;
+  }
+
+  private async loadCachedCount(
+    cacheKey: string,
+    loader: () => Promise<number>,
+  ): Promise<number> {
+    const cached = await this.redis.getJson<{ memberCount: number }>(cacheKey);
+    if (cached && typeof cached.memberCount === 'number') {
+      return cached.memberCount;
+    }
+
+    const memberCount = await loader();
+    await this.redis.setJson(
+      cacheKey,
+      { memberCount },
+      AUDIENCE_COUNT_CACHE_TTL_SECONDS,
+    );
+    return memberCount;
+  }
+
   private async toResponse(
     item: {
       id: string;
@@ -286,11 +402,17 @@ export class AudiencesService {
       createdAt: Date;
       updatedAt: Date;
     },
+    userId: string,
     lineAccountId: string | null,
   ) {
     const type = item.type as AudienceSegmentType;
     const criteria = this.parseCriteria(item.criteria);
-    const memberCount = await this.countMembers(lineAccountId, type, criteria);
+    const memberCount = await this.countMembers(
+      userId,
+      lineAccountId,
+      type,
+      criteria,
+    );
 
     return {
       id: item.id,

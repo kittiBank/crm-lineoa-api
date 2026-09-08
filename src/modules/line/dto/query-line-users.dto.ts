@@ -8,6 +8,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import {
+  LINE_USER_TIER_FILTERS,
+  LineUserTierFilter,
+} from '../types/line-user-tier';
 
 export class QueryLineUsersDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
@@ -53,6 +57,15 @@ export class QueryLineUsersDto {
   @IsOptional()
   @IsIn(['All', 'Member', 'Guest'])
   userType?: 'All' | 'Member' | 'Guest' = 'All';
+
+  @ApiPropertyOptional({
+    enum: LINE_USER_TIER_FILTERS,
+    default: 'All',
+    description: 'Filter by user tier. Excel import will populate this later.',
+  })
+  @IsOptional()
+  @IsIn(LINE_USER_TIER_FILTERS)
+  userTier?: LineUserTierFilter = 'All';
 
   @ApiPropertyOptional({ description: 'Filter by date added (YYYY-MM-DD)' })
   @IsOptional()

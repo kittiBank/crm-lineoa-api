@@ -9,6 +9,7 @@ import { QueryLineUsersDto } from './dto/query-line-users.dto';
 import { UpsertLineAccountDto } from './dto/verify-line.dto';
 import { AutoReplyQueueService } from '@/queue/auto-reply-queue.service';
 import { LineOaInfo, LineOaInfoFields, StoredLineOaInfo } from './types/line-oa-info';
+import { mapLineUserTier } from './types/line-user-tier';
 
 @Injectable()
 export class LineService {
@@ -575,6 +576,28 @@ export class LineService {
     return { followerCount, targetedReaches, blockCount };
   }
 
+  async getFollowerCountForUser(userId: string): Promise<number> {
+    const account =
+      await this.lineAccountRepository.getLineAccountByUserId(userId);
+
+    if (!account) {
+      return 0;
+    }
+
+    if (!account.channelAccessToken || !account.channelSecret) {
+      return this.prisma.lineUser.count({
+        where: { lineAccountId: account.id, status: 'following' },
+      });
+    }
+
+    const client = this.createClient(
+      account.channelAccessToken,
+      account.channelSecret,
+    );
+    const insight = await this.fetchFollowerInsight(client, account.id);
+    return insight.followerCount ?? 0;
+  }
+
   private async fetchMessageQuota(client: line.Client) {
     try {
       const [limit, usage] = await Promise.all([
@@ -1095,6 +1118,10 @@ export class LineService {
       where.userType = query.userType;
     }
 
+    if (query.userTier && query.userTier !== 'All') {
+      where.userTier = query.userTier;
+    }
+
     if (query.search) {
       if (query.searchType === 'displayName') {
         where.displayName = {
@@ -1191,6 +1218,7 @@ export class LineService {
     pictureUrl: string | null;
     status: string;
     userType: string;
+    userTier?: string | null;
     phone: string | null;
     followedAt: Date | null;
     lastActivity: Date | null;
@@ -1204,6 +1232,7 @@ export class LineService {
       userType: (user.userType === 'Member' ? 'Member' : 'Guest') as
         | 'Member'
         | 'Guest',
+      userTier: mapLineUserTier(user.userTier),
       phone: user.phone || undefined,
       status: this.mapDbStatusToUi(user.status),
       tags: [] as string[],
