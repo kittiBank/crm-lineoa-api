@@ -36,8 +36,8 @@
     "obs:down": "docker compose -f docker-compose.observability.yml down",
     "obs:logs": "docker compose -f docker-compose.observability.yml logs -f",
     "loadtest:login": "k6 run load-tests/login.js",
-    "docker:prod:build": "docker compose -f docker-compose.prod.yml build",
-    "docker:prod:up": "docker compose -f docker-compose.prod.yml up -d --build",
+    "docker:prod:pull": "docker compose -f docker-compose.prod.yml pull api worker",
+    "docker:prod:up": "docker compose -f docker-compose.prod.yml up -d --no-build",
     "docker:prod:down": "docker compose -f docker-compose.prod.yml down",
     "docker:prod:logs": "docker compose -f docker-compose.prod.yml logs -f api worker"
   },

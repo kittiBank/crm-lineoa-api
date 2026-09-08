@@ -1,17 +1,16 @@
 # Production-style stack for a single GCP e2-micro host.
 # Postgres lives on Neon — do not start a local postgres service here.
 # Object storage uses GCS via the S3 XML API (credentials via .env from CI secrets).
+# API/worker image is built in GitHub Actions and pulled from GHCR (API_IMAGE in .env).
 #
 # Usage (on the VM, with a filled .env):
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml pull api worker
+#   docker compose -f docker-compose.prod.yml up -d --no-build
 #   docker compose -f docker-compose.prod.yml logs -f api worker
 
 services:
   api:
-    image: crm-lineoa-api:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${API_IMAGE:-ghcr.io/kittibank/crm-lineoa-api:latest}
     container_name: crm_lineoa_api
     restart: unless-stopped
     env_file:
@@ -45,7 +44,7 @@ services:
       start_period: 40s
 
   worker:
-    image: crm-lineoa-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/kittibank/crm-lineoa-api:latest}
     container_name: crm_lineoa_worker
     restart: unless-stopped
     command: ['node', 'dist/worker/main.js']

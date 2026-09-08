@@ -95,7 +95,8 @@ Object storage local ใช้ MinIO ผ่าน env `S3_*` (S3-compatible)
 
 จาก `docker-compose.prod.yml` + GitHub Actions (`deploy-prod.yml`)
 
-บน GCP VM (`e2-micro`, `us-central1`) มี **API, Worker, RabbitMQ** ใน Docker เดียวกัน  
+GitHub Actions **build image บน CI** แล้ว push ไป **GHCR** (`ghcr.io/kittibank/crm-lineoa-api`)  
+บน GCP VM (`e2-micro`, `us-central1`) มี **API, Worker, RabbitMQ** ใน Docker เดียวกัน — VM **pull image อย่างเดียว ไม่ build**  
 **ไม่มี** Postgres / MinIO ใน compose นี้
 
 ```mermaid
@@ -127,7 +128,7 @@ flowchart TB
 
 | ชิ้น | ที่อยู่ | หมายเหตุ |
 |------|---------|----------|
-| `api` | container จาก `Dockerfile` | `CMD node dist/main.js`, รัน migrate ถ้า `RUN_MIGRATIONS=true` |
+| `api` | image จาก GHCR (`API_IMAGE`) | `CMD node dist/main.js`, รัน migrate ถ้า `RUN_MIGRATIONS=true` |
 | `worker` | image เดียวกัน | override command เป็น worker, `RUN_MIGRATIONS=false` |
 | `rabbitmq` | container ใน `crm_network` | **ไม่เปิดพอร์ตออก host** |
 | PostgreSQL | **Neon** | `DATABASE_URL` Direct/unpooled + `sslmode=require` |
@@ -141,7 +142,7 @@ Always Free ที่ต้องตรง: เครื่อง `e2-micro` + r
 
 Worker ขึ้นหลัง API healthy เพราะ API รัน migrate ก่อน
 
-Deploy: tag `v*.*.*` หรือ **Actions → Deploy Production → Run workflow** — SSH ไป **IP ของ VM** ไม่ใช่ `crm-api.vortex-dev.com` (Cloudflare ไม่พร็อกซีพอร์ต 22)
+Deploy: tag `v*.*.*` หรือ **Actions → Deploy Production → Run workflow** — CI build/push ไป GHCR แล้ว SSH ไป **IP ของ VM** เพื่อ `docker pull` + `compose up --no-build` ไม่ใช่ `crm-api.vortex-dev.com` (Cloudflare ไม่พร็อกซีพอร์ต 22)
 
 ---
 
@@ -216,5 +217,6 @@ flowchart LR
 | Prod compose | `docker-compose.prod.yml` |
 | Image | `Dockerfile` |
 | Env ตัวอย่าง | `.env.example` |
-| Deploy GCP | `.github/workflows/deploy-prod.yml` |
+| Deploy GCP | `.github/workflows/deploy-prod.yml` (build on CI, pull on VM) |
+| Prod image | `ghcr.io/kittibank/crm-lineoa-api` |
 | Render prod `.env` | `scripts/deploy/render-env.sh` |

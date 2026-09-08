@@ -19,6 +19,7 @@ require_var LINE_BOT_CHANNEL_ACCESS_TOKEN
 require_var LINE_BOT_CHANNEL_SECRET
 require_var S3_ACCESS_KEY
 require_var S3_SECRET_KEY
+require_var API_IMAGE
 
 # Optional overrides (GitHub secret / variable). Empty = use prod default below.
 FRONTEND_URL="${FRONTEND_URL:-https://crm-web.vortex-dev.com}"
@@ -36,6 +37,7 @@ cat <<EOF
 DEPLOY_TAG=${DEPLOY_TAG:-unknown}
 DEPLOY_SHA=${DEPLOY_SHA:-unknown}
 DEPLOYED_AT=${DEPLOYED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+API_IMAGE=${API_IMAGE}
 
 NODE_ENV=production
 PORT=3000

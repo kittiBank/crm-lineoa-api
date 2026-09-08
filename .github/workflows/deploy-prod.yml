@@ -4,7 +4,9 @@ name: Deploy Production
 #   - push semver tag v*.*.*  → deploy
 #   - or Actions → Run workflow (manual)
 #
-# Target: GCP e2-micro (not EC2). SSH to the VM public IP, not crm-api.vortex-dev.com
+# Build the API/worker image on GitHub-hosted runners, push to GHCR, then SSH to
+# the GCP e2-micro and pull (do not docker build on the VM).
+# SSH to the VM public IP, not crm-api.vortex-dev.com
 # (Cloudflare proxy only handles 80/443; SSH must use the raw IP).
 
 on:
@@ -19,18 +21,20 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   deploy:
     name: Deploy API to GCP
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment: production
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve deploy tag
+      - name: Resolve deploy tag and image
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${GITHUB_SHA::7}"
@@ -41,13 +45,42 @@ jobs:
               exit 1
             fi
           fi
+          REPO_LC="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           echo "IMAGE_TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "Deploying: ${TAG}"
+          echo "IMAGE_NAME=ghcr.io/${REPO_LC}" >> "$GITHUB_ENV"
+          echo "API_IMAGE=ghcr.io/${REPO_LC}:${TAG}" >> "$GITHUB_ENV"
+          echo "Deploying: ghcr.io/${REPO_LC}:${TAG}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Render production .env
         env:
           DEPLOY_TAG: ${{ env.IMAGE_TAG }}
           DEPLOY_SHA: ${{ github.sha }}
+          API_IMAGE: ${{ env.API_IMAGE }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           LINE_BOT_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_BOT_CHANNEL_ACCESS_TOKEN }}
@@ -84,43 +117,9 @@ jobs:
           APP_DIR="${GCP_APP_DIR:-/home/${GCP_USER}/crm-lineoa-api}"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${GCP_USER}@${GCP_HOST}" \
-            "set -euo pipefail
-             mkdir -p '${APP_DIR}'
-             if ! command -v rsync >/dev/null 2>&1; then
-               echo 'Installing rsync on remote host...'
-               if command -v apt-get >/dev/null 2>&1; then
-                 sudo apt-get update -qq
-                 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync
-               elif command -v dnf >/dev/null 2>&1; then
-                 sudo dnf install -y rsync
-               elif command -v yum >/dev/null 2>&1; then
-                 sudo yum install -y rsync
-               else
-                 echo 'rsync is required on the remote host but no supported package manager was found' >&2
-                 exit 1
-               fi
-             fi
-             echo \"rsync ready: \$(command -v rsync)\""
+            "mkdir -p '${APP_DIR}/scripts/deploy'"
 
-      - name: Sync application to GCP
-        env:
-          GCP_HOST: ${{ secrets.GCP_HOST }}
-          GCP_USER: ${{ secrets.GCP_USER }}
-          GCP_APP_DIR: ${{ vars.GCP_APP_DIR }}
-        run: |
-          APP_DIR="${GCP_APP_DIR:-/home/${GCP_USER}/crm-lineoa-api}"
-          rsync -az --delete \
-            --exclude '.git/' \
-            --exclude 'node_modules/' \
-            --exclude 'dist/' \
-            --exclude 'coverage/' \
-            --exclude '.env' \
-            --exclude '.env.*' \
-            --exclude '.pnpm-store/' \
-            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
-            ./ "${GCP_USER}@${GCP_HOST}:${APP_DIR}/"
-
-      - name: Upload .env and run deploy
+      - name: Upload compose files and .env
         env:
           GCP_HOST: ${{ secrets.GCP_HOST }}
           GCP_USER: ${{ secrets.GCP_USER }}
@@ -128,10 +127,30 @@ jobs:
         run: |
           APP_DIR="${GCP_APP_DIR:-/home/${GCP_USER}/crm-lineoa-api}"
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            .env.deploy "${GCP_USER}@${GCP_HOST}:${APP_DIR}/.env"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            docker-compose.prod.yml \
+            "${GCP_USER}@${GCP_HOST}:${APP_DIR}/docker-compose.prod.yml"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            scripts/deploy/remote-deploy.sh \
+            "${GCP_USER}@${GCP_HOST}:${APP_DIR}/scripts/deploy/remote-deploy.sh"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            .env.deploy \
+            "${GCP_USER}@${GCP_HOST}:${APP_DIR}/.env"
+
+      - name: Pull image on GCP and recreate stack
+        env:
+          GCP_HOST: ${{ secrets.GCP_HOST }}
+          GCP_USER: ${{ secrets.GCP_USER }}
+          GCP_APP_DIR: ${{ vars.GCP_APP_DIR }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          APP_DIR="${GCP_APP_DIR:-/home/${GCP_USER}/crm-lineoa-api}"
+          printf '%s\n' "${GHCR_TOKEN}" | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${GCP_USER}@${GCP_HOST}" \
-            "chmod +x '${APP_DIR}/scripts/deploy/remote-deploy.sh' && \
+            "set -euo pipefail
+             docker login ghcr.io -u '${GHCR_USER}' --password-stdin
+             chmod +x '${APP_DIR}/scripts/deploy/remote-deploy.sh'
              APP_DIR='${APP_DIR}' IMAGE_TAG='${IMAGE_TAG}' bash '${APP_DIR}/scripts/deploy/remote-deploy.sh'"
 
       - name: Post-deploy smoke test

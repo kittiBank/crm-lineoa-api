@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs on the GCP VM after rsync + .env upload.
+# Runs on the GCP VM after CI has pushed the image to GHCR and uploaded compose + .env.
+# Pulls the pre-built image — do not docker build on this host.
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
@@ -18,32 +19,35 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-echo "==> Deploying ${IMAGE_TAG} to $(hostname)"
+API_IMAGE="$(grep -E '^API_IMAGE=' .env | tail -n1 | cut -d= -f2- || true)"
+if [ -z "${API_IMAGE}" ]; then
+  echo "Missing API_IMAGE in .env" >&2
+  exit 1
+fi
+
+echo "==> Deploying ${API_IMAGE} (tag ${IMAGE_TAG}) to $(hostname)"
 echo "==> App directory: ${APP_DIR}"
 export IMAGE_TAG
 
-echo "==> Disk before cleanup:"
+echo "==> Disk before pull:"
 df -h / || true
 docker system df || true
 
-# Stop api/worker so their old images can be pruned (brief downtime).
-# Leaving them running is what filled the disk on the last ENOSPC build.
-echo "==> Stopping api + worker to reclaim image layers..."
-docker compose -f "$COMPOSE_FILE" stop api worker >/dev/null 2>&1 || true
-
-echo "==> Freeing unused Docker data..."
-docker container prune -f >/dev/null 2>&1 || true
-docker image prune -af >/dev/null 2>&1 || true
+# Drop leftover local build cache from the old on-VM docker build path.
+# Keep running containers and their images so api/worker stay up during pull.
+echo "==> Freeing unused Docker builder cache and dangling images..."
 docker builder prune -af >/dev/null 2>&1 || true
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
 
 echo "==> Disk after cleanup:"
 df -h / || true
 
-echo "==> Building image (shared by api + worker)..."
-docker compose -f "$COMPOSE_FILE" build api
+echo "==> Pulling application image..."
+docker compose -f "$COMPOSE_FILE" pull api worker
 
-echo "==> Starting stack..."
-docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+echo "==> Recreating stack (no build)..."
+docker compose -f "$COMPOSE_FILE" up -d --remove-orphans --no-build
 
 echo "==> Waiting for API health..."
 healthy=0
@@ -62,8 +66,8 @@ if [ "$healthy" -ne 1 ]; then
   exit 1
 fi
 
-echo "==> Pruning dangling images..."
-docker image prune -f >/dev/null 2>&1 || true
+echo "==> Removing images no longer used by running containers..."
+docker image prune -af >/dev/null 2>&1 || true
 
-echo "==> Deploy successful: ${IMAGE_TAG}"
+echo "==> Deploy successful: ${API_IMAGE}"
 docker compose -f "$COMPOSE_FILE" ps

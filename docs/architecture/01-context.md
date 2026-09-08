@@ -163,7 +163,7 @@ API ตรวจ signature แล้วจัดการ event (`follow`, `unfo
 - Worker
 - Prisma schema / migrations
 - Docker Compose สำหรับ infra (local) และ API+Worker+RabbitMQ (prod)
-- GitHub Actions deploy ไป GCP (`.github/workflows/deploy-prod.yml`)
+- GitHub Actions: build image บน CI → GHCR → GCP VM pull (`.github/workflows/deploy-prod.yml`)
 
 **อยู่นอก repo**
 
