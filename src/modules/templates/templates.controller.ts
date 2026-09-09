@@ -121,6 +121,17 @@ export class TemplatesController {
     return this.templatesService.uploadVideo(req.user.id, video);
   }
 
+  @Get('merge-tags')
+  @ApiOperation({
+    summary: 'List merge tags for text and flex templates',
+    description:
+      'Values are resolved from line_users when a message is sent, without calling the LINE API',
+  })
+  @ApiOkResponse({ description: 'Available merge tags' })
+  listMergeTags() {
+    return this.templatesService.listMergeTags();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get message template by ID' })
   @ApiOkResponse({ description: 'Template detail' })

@@ -11,6 +11,7 @@ import { CreateMessageTemplateDto } from './dto/create-message-template.dto';
 import { MessageBlockDto } from './dto/message-block.dto';
 import { UpdateMessageTemplateDto } from './dto/update-message-template.dto';
 import { validateFlexContents } from './flex-contents.validator';
+import { listMergeTags as getMergeTagCatalog } from './merge-tags';
 
 const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'flex', 'carousel']);
 
@@ -26,6 +27,10 @@ export class TemplatesService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
   ) {}
+
+  listMergeTags() {
+    return getMergeTagCatalog();
+  }
 
   async findAll(userId: string) {
     const templates = await this.prisma.messageTemplate.findMany({

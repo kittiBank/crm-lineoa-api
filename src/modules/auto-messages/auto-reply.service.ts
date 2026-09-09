@@ -6,6 +6,10 @@ import {
 } from '../campaigns/line-message.builder';
 import { LineService } from '../line/line.service';
 import { AutoReplyQueueMessage } from '@/queue/queue.constants';
+import {
+  applyMergeTagsToMessageBlocks,
+  buildMergeTagValues,
+} from '../templates/merge-tags';
 
 @Injectable()
 export class AutoReplyService {
@@ -51,7 +55,28 @@ export class AutoReplyService {
       match.template.messages,
       match.template.content,
     );
-    const lineMessages = buildLineMessages(messageBlocks);
+    const lineUser = await this.prisma.lineUser.findUnique({
+      where: {
+        lineAccountId_lineUserId: {
+          lineAccountId: payload.lineAccountId,
+          lineUserId: payload.platformLineUserId,
+        },
+      },
+      select: {
+        lineUserId: true,
+        displayName: true,
+        pictureUrl: true,
+        userType: true,
+        userTier: true,
+        phone: true,
+      },
+    });
+    const lineMessages = buildLineMessages(
+      applyMergeTagsToMessageBlocks(
+        messageBlocks,
+        buildMergeTagValues(lineUser),
+      ),
+    );
 
     if (lineMessages.length === 0) {
       this.logger.warn(

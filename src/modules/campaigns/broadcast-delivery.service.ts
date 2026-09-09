@@ -11,6 +11,11 @@ import {
   buildLineMessages,
   parseTemplateMessageBlocks,
 } from './line-message.builder';
+import {
+  applyMergeTagsToMessageBlocks,
+  buildMergeTagValues,
+  messageBlocksHaveMergeTags,
+} from '../templates/merge-tags';
 
 const MULTICAST_BATCH_SIZE = 500;
 const BROADCAST_MEDIA_TTL_SECONDS = 60 * 60 * 24;
@@ -96,6 +101,7 @@ export class BroadcastDeliveryService {
 
     let successCount = 0;
     let failureCount = 0;
+    let deliveredMessageUnits = 0;
     const logs: {
       broadcastId: string;
       lineUserId: string;
@@ -104,9 +110,21 @@ export class BroadcastDeliveryService {
     }[] = [];
 
     try {
-      if (broadcast.audienceType === 'all') {
+      if (messageBlocksHaveMergeTags(messageBlocks)) {
+        const personalized = await this.deliverPersonalizedBroadcast(
+          client,
+          broadcastId,
+          messageBlocks,
+          recipients,
+        );
+        successCount = personalized.successCount;
+        failureCount = personalized.failureCount;
+        deliveredMessageUnits = personalized.deliveredMessageUnits;
+        logs.push(...personalized.logs);
+      } else if (broadcast.audienceType === 'all') {
         await client.broadcast(lineMessages);
         successCount = messageCount;
+        deliveredMessageUnits = successCount * lineMessages.length;
 
         for (const recipient of recipients) {
           logs.push({
@@ -128,6 +146,7 @@ export class BroadcastDeliveryService {
           try {
             await client.multicast(batchIds, lineMessages);
             successCount += batchIds.length;
+            deliveredMessageUnits += batchIds.length * lineMessages.length;
 
             for (const recipient of batchRecipients) {
               logs.push({
@@ -162,6 +181,7 @@ export class BroadcastDeliveryService {
 
       failureCount = messageCount;
       successCount = 0;
+      deliveredMessageUnits = 0;
 
       for (const recipient of recipients) {
         logs.push({
@@ -188,7 +208,7 @@ export class BroadcastDeliveryService {
       try {
         await this.lineService.refreshMessageQuotaAfterBroadcast(
           userId,
-          successCount * lineMessages.length,
+          deliveredMessageUnits,
         );
       } catch (error) {
         this.logger.warn(
@@ -228,8 +248,89 @@ export class BroadcastDeliveryService {
       select: {
         id: true,
         lineUserId: true,
+        displayName: true,
+        pictureUrl: true,
+        userType: true,
+        userTier: true,
+        phone: true,
       },
     });
+  }
+
+  private async deliverPersonalizedBroadcast(
+    client: ReturnType<LineService['createClient']>,
+    broadcastId: string,
+    messageBlocks: ReturnType<typeof parseTemplateMessageBlocks>,
+    recipients: Awaited<ReturnType<BroadcastDeliveryService['getRecipients']>>,
+  ) {
+    const PUSH_CONCURRENCY = 10;
+    let successCount = 0;
+    let failureCount = 0;
+    let deliveredMessageUnits = 0;
+    const logs: {
+      broadcastId: string;
+      lineUserId: string;
+      status: string;
+      errorMessage?: string;
+    }[] = [];
+
+    for (let index = 0; index < recipients.length; index += PUSH_CONCURRENCY) {
+      const batch = recipients.slice(index, index + PUSH_CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (recipient) => {
+          const messages = buildLineMessages(
+            applyMergeTagsToMessageBlocks(
+              messageBlocks,
+              buildMergeTagValues(recipient),
+            ),
+          );
+
+          if (messages.length === 0) {
+            throw new Error('Template has no valid messages after merge tags');
+          }
+
+          await client.pushMessage(recipient.lineUserId, messages);
+          return messages.length;
+        }),
+      );
+
+      results.forEach((result, resultIndex) => {
+        const recipient = batch[resultIndex];
+        if (!recipient) {
+          return;
+        }
+
+        if (result.status === 'fulfilled') {
+          successCount += 1;
+          deliveredMessageUnits += result.value;
+          logs.push({
+            broadcastId,
+            lineUserId: recipient.id,
+            status: 'sent',
+          });
+          return;
+        }
+
+        const errorMessage = this.getErrorMessage(result.reason);
+        failureCount += 1;
+        this.logger.error(
+          `Failed to push personalized broadcast ${broadcastId} to ${recipient.lineUserId}: ${errorMessage}`,
+        );
+        logs.push({
+          broadcastId,
+          lineUserId: recipient.id,
+          status: 'failed',
+          errorMessage,
+        });
+      });
+    }
+
+    return {
+      successCount,
+      failureCount,
+      deliveredMessageUnits,
+      logs,
+    };
   }
 
   private async finalizeBroadcast(
