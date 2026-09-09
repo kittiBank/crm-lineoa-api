@@ -6,12 +6,17 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { RedisService } from '@/redis/redis.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateMessageTemplateDto } from './dto/create-message-template.dto';
 import { MessageBlockDto } from './dto/message-block.dto';
 import { UpdateMessageTemplateDto } from './dto/update-message-template.dto';
 import { validateFlexContents } from './flex-contents.validator';
 import { listMergeTags as getMergeTagCatalog } from './merge-tags';
+import {
+  TEMPLATES_LIST_CACHE_TTL_SECONDS,
+  templatesListCacheKey,
+} from './templates-cache';
 
 const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'flex', 'carousel']);
 
@@ -26,6 +31,7 @@ export class TemplatesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly redis: RedisService,
   ) {}
 
   listMergeTags() {
@@ -33,17 +39,22 @@ export class TemplatesService {
   }
 
   async findAll(userId: string) {
-    const templates = await this.prisma.messageTemplate.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: {
-          select: { broadcasts: true },
-        },
-      },
-    });
+    const cacheKey = templatesListCacheKey(userId);
+    const cached = await this.redis.getJson<
+      Awaited<ReturnType<TemplatesService['loadTemplateList']>>
+    >(cacheKey);
 
-    return Promise.all(templates.map((template) => this.toResponse(template)));
+    if (cached) {
+      return cached;
+    }
+
+    const templates = await this.loadTemplateList(userId);
+    await this.redis.setJson(
+      cacheKey,
+      templates,
+      TEMPLATES_LIST_CACHE_TTL_SECONDS,
+    );
+    return templates;
   }
 
   async findOne(userId: string, id: string) {
@@ -88,6 +99,7 @@ export class TemplatesService {
       },
     });
 
+    await this.invalidateListCache(userId);
     return this.toResponse(template);
   }
 
@@ -244,6 +256,7 @@ export class TemplatesService {
       },
     });
 
+    await this.invalidateListCache(userId);
     return this.toResponse(template);
   }
 
@@ -254,7 +267,26 @@ export class TemplatesService {
       where: { id },
     });
 
+    await this.invalidateListCache(userId);
     return { status: 'ok', id };
+  }
+
+  private async loadTemplateList(userId: string) {
+    const templates = await this.prisma.messageTemplate.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: {
+          select: { broadcasts: true },
+        },
+      },
+    });
+
+    return Promise.all(templates.map((template) => this.toResponse(template)));
+  }
+
+  private async invalidateListCache(userId: string) {
+    await this.redis.del(templatesListCacheKey(userId));
   }
 
   private resolveMessageType(messages: MessageBlockDto[]): string {
