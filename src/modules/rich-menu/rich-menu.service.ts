@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as line from '@line/bot-sdk';
+import { imageSize } from 'image-size';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { LineAccountRepository } from '../line/repositories/line-account.repository';
@@ -140,6 +141,22 @@ export class RichMenuService {
       layout = getLayoutById(dto.layoutId);
     } catch {
       throw new BadRequestException(`Unknown layout: ${dto.layoutId}`);
+    }
+
+    let dimensions: { width: number; height: number };
+    try {
+      dimensions = imageSize(imageBuffer);
+    } catch {
+      throw new BadRequestException('Uploaded file is not a valid image');
+    }
+
+    if (
+      dimensions.width !== layout.size.width ||
+      dimensions.height !== layout.size.height
+    ) {
+      throw new BadRequestException(
+        `Image must be exactly ${layout.size.width}×${layout.size.height}px for the "${dto.layoutId}" layout (received ${dimensions.width}×${dimensions.height}px)`,
+      );
     }
 
     if (dto.areas.length === 0) {
